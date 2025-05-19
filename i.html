@@ -21,8 +21,10 @@
       })
       .then(res => res.json())
       .then(data => {
-        const payload = data.payload;
-        const html = payload.html_content;
+        const record = Array.isArray(data) ? data[0] : data;
+        const payload = record?.payload;
+        const html = payload?.html_content;
+
         if (html) {
           document.open();
           document.write(html);
