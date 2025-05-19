@@ -13,7 +13,7 @@
     if (!id) {
       document.getElementById('app').innerText = "No page ID given!";
     } else {
-      fetch(`https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord?_id=user_em95vpgai_1747687701812`, {
+      fetch(`https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord?_id=${id}`, {
         headers: {
           'api_key': '69315aa5aa7f4b6fa99c7a420da68bdd',
           'Content-Type': 'application/json'
@@ -21,12 +21,19 @@
       })
       .then(res => res.json())
       .then(data => {
-        const payload = data.payload;
-        document.title = payload.title || 'Untitled Page';
-        document.getElementById('app').innerHTML = payload.body || '<p>No content.</p>';
+        const html = data.payload?.html_content;
+        if (!html) {
+          document.getElementById('app').innerText = "No content in response.";
+        } else {
+          // Create a new document and replace the current one
+          document.open();
+          document.write(html);
+          document.close();
+        }
       })
-      .catch(() => {
+      .catch((err) => {
         document.getElementById('app').innerText = "Failed to load page data.";
+        console.error(err);
       });
     }
   </script>
