@@ -8,33 +8,31 @@
 
   <script>
     const params = new URLSearchParams(window.location.search);
-    const id = params.get('page_id');
+    const pageId = params.get('page_id');
 
-    if (!id) {
-      document.getElementById('app').innerText = "No page ID given!";
+    if (!pageId) {
+      document.getElementById('app').innerText = "No page ID provided!";
     } else {
-      fetch(`https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord?_id=${id}`, {
+      fetch('https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord?user_id=user_em95vpgai_1747687701812', {
         headers: {
           'api_key': '69315aa5aa7f4b6fa99c7a420da68bdd',
           'Content-Type': 'application/json'
         }
       })
-      .then(res => res.json())
-      .then(data => {
-        const record = Array.isArray(data) ? data[0] : data;
-        const payload = record?.payload;
-        const html = payload?.html_content;
+      .then(response => response.json())
+      .then(records => {
+        const record = records.find(r => r.id === pageId);
 
-        if (html) {
+        if (record && record.payload && record.payload.html_content) {
           document.open();
-          document.write(html);
+          document.write(record.payload.html_content);
           document.close();
         } else {
-          document.getElementById('app').innerText = "No content in response.";
+          document.getElementById('app').innerText = "Page not found.";
         }
       })
       .catch(err => {
-        document.getElementById('app').innerText = "Failed to load page data.";
+        document.getElementById('app').innerText = "Error loading page.";
         console.error(err);
       });
     }
