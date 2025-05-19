@@ -21,17 +21,17 @@
       })
       .then(res => res.json())
       .then(data => {
-        const html = data.payload?.html_content;
-        if (!html) {
-          document.getElementById('app').innerText = "No content in response.";
-        } else {
-          // Create a new document and replace the current one
+        const payload = data.payload;
+        const html = payload.html_content;
+        if (html) {
           document.open();
           document.write(html);
           document.close();
+        } else {
+          document.getElementById('app').innerText = "No content in response.";
         }
       })
-      .catch((err) => {
+      .catch(err => {
         document.getElementById('app').innerText = "Failed to load page data.";
         console.error(err);
       });
