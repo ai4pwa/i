@@ -4,13 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Render Base44 StorageItem</title>
-    <script src="https://unpkg.com/@base44/sdk@0.1.2/dist/index.js"></script>
 </head>
 <body>
     <div id="content"></div>
     <script>
         console.log('Script running');
-        console.log('createClient:', typeof createClient);
 
         // Get the 'page' query parameter
         const urlParams = new URLSearchParams(window.location.search);
@@ -27,16 +25,21 @@
             }
 
             try {
-                // Initialize Base44 client
-                const base44 = createClient({ 
-                    appId: '686424824d7b61721eac3e29',
-                    apiKey: '4fd12874c15643f395960cfa2d24d1a2' // Add API key if required
+                // Direct fetch to Base44 API
+                const response = await fetch(`https://app.base44.com/api/apps/686424824d7b61721eac3e29/entities/StorageItem?id=${itemId}`, {
+                    headers: {
+                        'api_key': '4fd12874c15643f395960cfa2d24d1a2',
+                        'Content-Type': 'application/json'
+                    }
                 });
-                console.log('Base44 client initialized');
+                console.log('API response status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
 
-                // Fetch StorageItem
-                const results = await base44.entities.StorageItem.filter({ id: itemId });
-                console.log('API response:', results);
+                const results = await response.json();
+                console.log('API response data:', results);
 
                 if (!results || results.length === 0) {
                     contentDiv.innerHTML = '<p>No StorageItem found for the specified ID.</p>';
