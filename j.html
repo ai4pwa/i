@@ -8,11 +8,12 @@
 <body>
     <div id="content"></div>
     <script>
-        // Get the 'page' query parameter
+        // Get query parameters
         const urlParams = new URLSearchParams(window.location.search);
         const itemId = urlParams.get('page');
+        const isRawRequest = urlParams.get('raw') === 'true';
 
-        // Map extensions to MIME types for inference
+        // Map extensions to MIME types
         const extensionToMimeType = {
             '.css': 'text/css',
             '.html': 'text/html',
@@ -25,22 +26,20 @@
 
         async function fetchAndRenderStorageItem() {
             const contentDiv = document.getElementById('content');
-            contentDiv.innerHTML = '<p>Loading...</p>';
+            if (!isRawRequest) {
+                contentDiv.innerHTML = '<p>Loading...</p>';
+            }
 
             if (!itemId) {
                 contentDiv.innerHTML = '<p>No page specified in the URL.</p>';
                 return;
             }
 
-            // Check if itemId is an HTML file and redirect immediately
+            // Redirect HTML files
             if (itemId.toLowerCase().endsWith('.html')) {
                 window.location.replace(`https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/${itemId}`);
                 return;
             }
-
-            // Check for raw CSS/JS request
-            const raw = urlParams.get('raw');
-            const isRawRequest = raw === 'true';
 
             try {
                 // Try Base44 API
@@ -56,20 +55,26 @@
                 }
 
                 const results = await response.json();
-
                 if (!results || results.length === 0) {
                     throw new Error('No StorageItem found for the specified ID');
                 }
 
                 const item = results[0];
-                const mimeType = item.mime_type || 'text/plain';
+                let mimeType = item.mime_type || 'text/plain';
 
-                // Handle different file types
-                if (mimeType === 'text/html') {
-                    window.location.replace(item.file_url);
-                } else if (isRawRequest && (mimeType === 'text/css' || mimeType === 'application/javascript')) {
-                    // Serve raw content for CSS/JS
+                // Infer MIME type
+                if (mimeType === 'application/octet-stream') {
+                    const extMatch = itemId.match(/(\.[a-zA-Z0-9]+)$/i);
+                    const inferredExt = extMatch ? extMatch[1].toLowerCase() : '';
+                    mimeType = extensionToMimeType[inferredExt] || mimeType;
+                }
+
+                // Handle file types
+                if (isRawRequest && (mimeType === 'text/css' || mimeType === 'application/javascript')) {
+                    // Serve raw content
+                    document.open();
                     document.write(item.content || '');
+                    document.close();
                     return;
                 } else if (mimeType.startsWith('image/')) {
                     contentDiv.innerHTML = `<img src="${item.file_url}" alt="${item.name || 'Image'}" style="max-width: 100%;">`;
@@ -96,7 +101,7 @@
                         const content = await response.text();
                         let mimeType = response.headers.get('content-type') || 'text/plain';
 
-                        // Infer MIME type from extension if application/octet-stream
+                        // Infer MIME type
                         if (mimeType === 'application/octet-stream') {
                             const extMatch = itemId.match(/(\.[a-zA-Z0-9]+)$/i);
                             const inferredExt = extMatch ? extMatch[1].toLowerCase() : ext;
@@ -105,8 +110,9 @@
 
                         // Render based on MIME type
                         if (isRawRequest && (mimeType === 'text/css' || mimeType === 'application/javascript')) {
-                            // Serve raw content for CSS/JS
+                            document.open();
                             document.write(content);
+                            document.close();
                             return;
                         } else if (mimeType.startsWith('image/')) {
                             contentDiv.innerHTML = `<img src="${supabaseUrl}" alt="Image" style="max-width: 100%;">`;
@@ -117,7 +123,7 @@
                         } else {
                             contentDiv.innerHTML = `<p>File type (${mimeType}) not directly renderable. <a href="${supabaseUrl}" download>Download file</a></p>`;
                         }
-                        return; // Success, exit loop
+                        return;
                     } catch (supabaseError) {
                         lastError = supabaseError;
                     }
