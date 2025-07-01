@@ -24,18 +24,6 @@
             return filename.split('.').pop().toLowerCase();
         }
 
-        // Function to trigger file download using <a> element
-        function triggerDownload(url, filename) {
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename; // Triggers download, respecting server headers
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            console.log('Download triggered for:', filename);
-            document.getElementById('content').innerHTML = '<p>Download started for: ' + filename + '</p>';
-        }
-
         // Base URL for fetching files
         const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
 
@@ -50,8 +38,9 @@
             console.log('Processing file:', fileUrl); // Debugging
 
             if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Handle image files by triggering download
-                triggerDownload(fileUrl, page);
+                // Redirect to the original URL for images to handle server redirect and download
+                console.log('Redirecting to:', fileUrl);
+                window.location.href = fileUrl;
             } else if (extension === 'js') {
                 // Handle JavaScript files
                 const script = document.createElement('script');
