@@ -1,23 +1,67 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>File Redirect</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic File Loader</title>
+    <style>
+        body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        img { max-width: 100%; height: auto; }
+        #content { width: 100%; max-width: 1200px; padding: 20px; }
+    </style>
 </head>
 <body>
+    <div id="content"></div>
     <script>
-        // Get URL parameters
-        const urlParams = new URLSearchParams(window.location.search);
-        const page = urlParams.get('page');
-        
-        // Check if page parameter exists and is not empty
+        // Function to get query parameter by name
+        function getQueryParam(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name);
+        }
+
+        // Function to get file extension from filename
+        function getFileExtension(filename) {
+            return filename.split('.').pop().toLowerCase();
+        }
+
+        // Base URL for fetching files
+        const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
+
+        // Get the page parameter from URL
+        const page = getQueryParam('page');
+        const contentDiv = document.getElementById('content');
+
         if (page) {
-            // Construct the redirect URL
-            const redirectUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${page}`;
-            // Perform the redirect
-            window.location.href = redirectUrl;
+            const extension = getFileExtension(page);
+            const fileUrl = baseUrl + page;
+
+            if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
+                // Handle image files
+                const img = document.createElement('img');
+                img.src = fileUrl;
+                img.alt = 'Loaded image';
+                contentDiv.appendChild(img);
+            } else if (extension === 'js') {
+                // Handle JavaScript files
+                const script = document.createElement('script');
+                script.src = fileUrl;
+                document.body.appendChild(script);
+            } else if (extension === 'html') {
+                // Handle HTML files
+                fetch(fileUrl)
+                    .then(response => response.text())
+                    .then(data => {
+                        contentDiv.innerHTML = data;
+                    })
+                    .catch(error => {
+                        contentDiv.innerHTML = '<p>Error loading HTML content.</p>';
+                        console.error('Error:', error);
+                    });
+            } else {
+                contentDiv.innerHTML = '<p>Unsupported file type.</p>';
+            }
         } else {
-            // Handle case where page parameter is missing
-            document.body.innerHTML = '<h1>Error: No file specified in URL</h1>';
+            contentDiv.innerHTML = '<p>No file specified in URL.</p>';
         }
     </script>
 </body>
