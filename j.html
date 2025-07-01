@@ -24,8 +24,9 @@
             return filename.split('.').pop().toLowerCase();
         }
 
-        // Base URL for fetching files
+        // Base URLs for fetching files
         const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
+        const supabaseBaseUrl = 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/';
 
         // Get the page parameter from URL
         const page = getQueryParam('page');
@@ -33,12 +34,19 @@
 
         if (page) {
             const extension = getFileExtension(page);
-            const fileUrl = baseUrl + page;
+            let fileUrl;
+
+            // Use Supabase URL for images, base44.app for other files
+            if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
+                fileUrl = supabaseBaseUrl + page;
+            } else {
+                fileUrl = baseUrl + page;
+            }
 
             console.log('Processing file:', fileUrl); // Debugging
 
             if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Redirect to the original URL for images to handle server redirect and download
+                // Redirect to Supabase URL for images to trigger download
                 console.log('Redirecting to:', fileUrl);
                 window.location.href = fileUrl;
             } else if (extension === 'js') {
