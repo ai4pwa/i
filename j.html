@@ -9,15 +9,17 @@
 <body>
     <div id="content"></div>
     <script>
-        // Initialize Base44 client
-        const base44 = createClient({ appId: '686424824d7b61721eac3e29' });
+        console.log('Script running');
+        console.log('createClient:', typeof createClient);
 
-        // Get the 'page' query parameter from the URL
+        // Get the 'page' query parameter
         const urlParams = new URLSearchParams(window.location.search);
         const itemId = urlParams.get('page');
+        console.log('itemId:', itemId);
 
         async function fetchAndRenderStorageItem() {
             const contentDiv = document.getElementById('content');
+            contentDiv.innerHTML = '<p>Loading...</p>';
 
             if (!itemId) {
                 contentDiv.innerHTML = '<p>No page specified in the URL.</p>';
@@ -25,29 +27,34 @@
             }
 
             try {
-                // Fetch StorageItem by ID using Base44 SDK
+                // Initialize Base44 client
+                const base44 = createClient({ 
+                    appId: '686424824d7b61721eac3e29',
+                    apiKey: '4fd12874c15643f395960cfa2d24d1a2' // Add API key if required
+                });
+                console.log('Base44 client initialized');
+
+                // Fetch StorageItem
                 const results = await base44.entities.StorageItem.filter({ id: itemId });
+                console.log('API response:', results);
 
                 if (!results || results.length === 0) {
                     contentDiv.innerHTML = '<p>No StorageItem found for the specified ID.</p>';
                     return;
                 }
 
-                const item = results[0]; // Get the first matching StorageItem
+                const item = results[0];
+                console.log('StorageItem:', item);
                 const mimeType = item.mime_type || 'text/plain';
 
                 // Handle different file types
                 if (mimeType.startsWith('image/')) {
-                    // Render images using file_url
                     contentDiv.innerHTML = `<img src="${item.file_url}" alt="${item.name || 'Image'}" style="max-width: 100%;">`;
                 } else if (mimeType.startsWith('text/') || mimeType === 'application/javascript' || mimeType === 'text/html' || mimeType === 'text/css') {
-                    // Render text-based files (HTML, CSS, JS, TXT) using content
                     contentDiv.innerHTML = `<pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">${item.content || 'No content available'}</pre>`;
                 } else if (mimeType === 'application/pdf') {
-                    // Render PDFs using an embed tag
                     contentDiv.innerHTML = `<embed src="${item.file_url}" type="application/pdf" width="100%" height="600px" />`;
                 } else {
-                    // Fallback for other file types (e.g., provide a download link)
                     contentDiv.innerHTML = `<p>File type (${mimeType}) not directly renderable. <a href="${item.file_url}" download>Download ${item.name || 'file'}</a></p>`;
                 }
             } catch (error) {
@@ -56,7 +63,6 @@
             }
         }
 
-        // Execute the fetch and render function
         fetchAndRenderStorageItem();
     </script>
 </body>
