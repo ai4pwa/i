@@ -2,89 +2,93 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>File Viewer</title>
+  <title>j.html viewer</title>
   <style>
-    html, body {
-      margin: 0; padding: 1rem;
+    body {
       font-family: monospace;
-      background: #fff; color: #000;
       white-space: pre-wrap;
+      padding: 1rem;
+    }
+    img, iframe {
+      max-width: 100%;
+      height: auto;
     }
   </style>
 </head>
 <body>
-  <div id="output">Loading...</div>
+  <div id="output">🔄 Loading...</div>
 
   <script>
     const page = new URLSearchParams(location.search).get("page");
     const apiKey = "4fd12874c15643f395960cfa2d24d1a2";
     const appId = "686424824d7b61721eac3e29";
+    const output = document.getElementById("output");
 
     if (!page) {
-      document.body.textContent = "❌ Missing ?page=filename.ext";
-      throw new Error("Missing file name");
+      output.textContent = "❌ Missing ?page=FILENAME";
+      throw new Error("Missing filename");
     }
 
-    fetch(`https://app.base44.com/api/apps/${appId}/entities/StorageItem?name=${encodeURIComponent(page)}`, {
+    fetch(`https://app.base44.com/api/apps/${appId}/entities/StorageItem`, {
       headers: {
         "api_key": apiKey,
         "Content-Type": "application/json"
       }
     })
     .then(res => res.json())
-    .then(results => {
-      const file = results.find(x => x.name === page);
-      if (!file) throw new Error("File not found");
+    .then(data => {
+      const file = data.find(f => f.name === page);
+      if (!file) {
+        output.textContent = "❌ File not found: " + page;
+        return;
+      }
 
-      const mime = file.mime_type || "text/plain";
+      const mime = file.mime_type || "";
       const content = file.content;
-      const url = file.file_url;
+      const fileUrl = file.file_url;
 
-      // Handle text-based files
-      if (content && mime.startsWith("text/") || mime.includes("javascript") || mime.includes("json")) {
-        const blob = new Blob([content], { type: mime });
-        const objectURL = URL.createObjectURL(blob);
-
-        // Inject correct Content-Type using Blob
-        if (mime === "text/html") {
-          // Replace entire document for HTML
-          location.href = objectURL;
-        } else if (mime === "text/css") {
+      if (content && (mime.includes("text/") || mime.includes("css") || mime.includes("javascript"))) {
+        // TEXT-BASED FILES
+        if (mime.includes("html")) {
+          const blob = new Blob([content], { type: "text/html" });
+          const url = URL.createObjectURL(blob);
+          location.href = url;
+        } else if (mime.includes("css")) {
           const style = document.createElement("style");
           style.textContent = content;
           document.head.appendChild(style);
-          document.body.textContent = "✅ CSS loaded via content";
+          output.textContent = "✅ CSS loaded.";
         } else if (mime.includes("javascript")) {
           const script = document.createElement("script");
           script.textContent = content;
           document.body.appendChild(script);
-          document.body.append("✅ JS executed via content");
+          output.textContent = "✅ JS loaded.";
         } else {
-          // Generic text viewer
-          document.body.textContent = content;
+          output.textContent = content;
         }
-      }
-
-      // Fallback: Open binary files via file_url
-      else if (url) {
-        // Render image directly
+      } else if (fileUrl) {
+        // BINARY FILES
         if (mime.startsWith("image/")) {
           const img = new Image();
-          img.src = url;
-          img.style.maxWidth = "100%";
-          document.body.innerHTML = "";
-          document.body.appendChild(img);
-        }
-        // Open PDF or download file
-        else {
-          location.href = url;
+          img.src = fileUrl;
+          output.innerHTML = "";
+          output.appendChild(img);
+        } else if (mime === "application/pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = fileUrl;
+          iframe.style.width = "100%";
+          iframe.style.height = "90vh";
+          output.innerHTML = "";
+          output.appendChild(iframe);
+        } else {
+          location.href = fileUrl;
         }
       } else {
-        throw new Error("No content or file_url available");
+        output.textContent = "❌ File has no usable content or URL.";
       }
     })
     .catch(err => {
-      document.body.textContent = "❌ " + err.message;
+      output.textContent = "❌ Error: " + err.message;
     });
   </script>
 </body>
