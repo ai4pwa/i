@@ -2,72 +2,80 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>File Viewer</title>
+  <title>File Loader</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; }
+    img { max-width: 100%; }
+  </style>
 </head>
 <body>
-  <div id="viewer">Loading...</div>
+  <div id="app">Loading...</div>
 
   <script>
-    const params = new URLSearchParams(location.search);
-    const page = params.get("page");
+    const page = new URLSearchParams(location.search).get("page");
+    const app = document.getElementById("app");
 
     if (!page) {
-      document.getElementById("viewer").innerText = "Missing ?page= parameter.";
-      throw new Error("No page param");
+      app.innerHTML = "<p>Missing <code>?page=</code> parameter.</p>";
+      throw new Error("Missing ?page=");
     }
 
     const ext = page.split('.').pop().toLowerCase();
-    const base = 'https://base44.app/api/apps/6863cdf437ac82672a3bff47/files/';
-    const fileUrl = `${base}${page}`;
+    const fileUrl = `https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/${page}`;
 
-    const render = {
+    const injectors = {
       html: () => {
         fetch(fileUrl)
-          .then(res => res.text())
+          .then(r => r.text())
           .then(html => {
             document.open();
             document.write(html);
             document.close();
-          })
-          .catch(err => {
-            document.body.innerHTML = `<h2>Error loading HTML: ${err}</h2>`;
+          });
+      },
+      css: () => {
+        fetch(fileUrl)
+          .then(r => r.text())
+          .then(css => {
+            const style = document.createElement("style");
+            style.textContent = css;
+            document.head.appendChild(style);
+            app.innerHTML = "<p>CSS loaded and applied dynamically.</p>";
           });
       },
       js: () => {
-        const script = document.createElement("script");
-        script.src = fileUrl;
-        script.type = "text/javascript";
-        script.onload = () => document.getElementById("viewer").remove();
-        document.body.appendChild(script);
+        fetch(fileUrl)
+          .then(r => r.text())
+          .then(js => {
+            const script = document.createElement("script");
+            script.textContent = js;
+            document.body.appendChild(script);
+            app.innerHTML = "<p>JavaScript loaded and executed.</p>";
+          });
       },
-      css: () => {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = fileUrl;
-        document.head.appendChild(link);
-        document.getElementById("viewer").innerText = "CSS loaded.";
-      },
-      png: imgHandler,
-      jpg: imgHandler,
-      jpeg: imgHandler,
-      gif: imgHandler,
-      svg: imgHandler,
-      webp: imgHandler
+      png: () => renderImage(fileUrl),
+      jpg: () => renderImage(fileUrl),
+      jpeg: () => renderImage(fileUrl),
+      gif: () => renderImage(fileUrl),
+      svg: () => renderImage(fileUrl),
+      webp: () => renderImage(fileUrl),
+      default: () => {
+        fetch(fileUrl)
+          .then(r => r.text())
+          .then(text => {
+            app.innerHTML = `<pre style="white-space: pre-wrap;">${text}</pre>`;
+          });
+      }
     };
 
-    function imgHandler() {
+    function renderImage(url) {
       const img = document.createElement("img");
-      img.src = fileUrl;
-      img.alt = page;
-      img.style.maxWidth = "100%";
-      document.getElementById("viewer").innerHTML = "";
-      document.getElementById("viewer").appendChild(img);
+      img.src = url;
+      app.innerHTML = "";
+      app.appendChild(img);
     }
 
-    (render[ext] || function () {
-      document.getElementById("viewer").innerText = `Unsupported file type: .${ext}`;
-    })();
-
+    (injectors[ext] || injectors.default)();
   </script>
 </body>
 </html>
