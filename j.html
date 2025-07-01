@@ -3,33 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Render Base44 File</title>
+    <title>Redirect to Base44 File</title>
 </head>
 <body>
-    <div id="content"></div>
+    <div id="content"><p>Loading...</p></div>
     <script>
-        // Get query parameters
+        // Get query parameter
         const urlParams = new URLSearchParams(window.location.search);
         const itemId = urlParams.get('page');
-        const isRawRequest = urlParams.get('raw') === 'true';
 
-        // Map extensions to MIME types
-        const extensionToMimeType = {
-            '.css': 'text/css',
-            '.html': 'text/html',
-            '.js': 'application/javascript',
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.pdf': 'application/pdf'
-        };
-
-        async function fetchAndRenderFile() {
+        async function redirectToBase44() {
             const contentDiv = document.getElementById('content');
-            if (!isRawRequest) {
-                contentDiv.innerHTML = '<p>Loading...</p>';
-            }
-
             if (!itemId) {
                 contentDiv.innerHTML = '<p>No page specified in the URL.</p>';
                 return;
@@ -37,6 +21,7 @@
 
             const base44Url = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${itemId}`;
             try {
+                // Verify the file exists
                 const response = await fetch(base44Url, {
                     headers: {
                         'api_key': '4fd12874c15643f395960cfa2d24d1a2'
@@ -47,49 +32,14 @@
                     throw new Error(`HTTP error! Status: ${response.status}`);
                 }
 
-                let mimeType = response.headers.get('content-type') || 'text/plain';
-                const extMatch = itemId.match(/(\.[a-zA-Z0-9]+)$/i);
-                const inferredExt = extMatch ? extMatch[1].toLowerCase() : '';
-                if (mimeType === 'application/octet-stream') {
-                    mimeType = extensionToMimeType[inferredExt] || mimeType;
-                }
-
-                if (isRawRequest && (mimeType === 'text/css' || mimeType === 'application/javascript')) {
-                    const content = await response.text();
-                    document.open();
-                    document.write(content);
-                    document.close();
-                    return;
-                }
-
-                if (mimeType === 'text/html') {
-                    const content = await response.text();
-                    // Render HTML in an iframe to display as a webpage
-                    const iframe = document.createElement('iframe');
-                    iframe.style.width = '100%';
-                    iframe.style.height = '100vh';
-                    iframe.style.border = 'none';
-                    contentDiv.innerHTML = '';
-                    contentDiv.appendChild(iframe);
-                    iframe.contentWindow.document.open();
-                    iframe.contentWindow.document.write(content);
-                    iframe.contentWindow.document.close();
-                } else if (mimeType.startsWith('image/')) {
-                    contentDiv.innerHTML = `<img src="${base44Url}" alt="${itemId}" style="max-width: 100%;">`;
-                } else if (mimeType === 'application/pdf') {
-                    contentDiv.innerHTML = `<embed src="${base44Url}" type="application/pdf" width="100%" height="600px" />`;
-                } else if (mimeType.startsWith('text/') || mimeType === 'application/javascript' || mimeType === 'text/css') {
-                    const content = await response.text();
-                    contentDiv.innerHTML = `<pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">${content}</pre>`;
-                } else {
-                    contentDiv.innerHTML = `<p>File type (${mimeType}) not directly renderable. <a href="${base44Url}" download>Download file</a></p>`;
-                }
+                // Redirect to the Base44 URL
+                window.location.replace(base44Url);
             } catch (error) {
                 contentDiv.innerHTML = `<p>Error loading from Base44: ${error.message}</p>`;
             }
         }
 
-        fetchAndRenderFile();
+        redirectToBase44();
     </script>
 </body>
 </html>
