@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redirect to Base44 File</title>
+    <title>Render Base44 File</title>
 </head>
 <body>
     <div id="content"><p>Loading...</p></div>
@@ -12,7 +12,18 @@
         const urlParams = new URLSearchParams(window.location.search);
         const itemId = urlParams.get('page');
 
-        async function redirectToBase44() {
+        // Map extensions to MIME types for inference
+        const extensionToMimeType = {
+            '.css': 'text/css',
+            '.html': 'text/html',
+            '.js': 'application/javascript',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.pdf': 'application/pdf'
+        };
+
+        async function processFile() {
             const contentDiv = document.getElementById('content');
             if (!itemId) {
                 contentDiv.innerHTML = '<p>No page specified in the URL.</p>';
@@ -21,7 +32,6 @@
 
             const base44Url = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${itemId}`;
             try {
-                // Verify the file exists
                 const response = await fetch(base44Url, {
                     headers: {
                         'api_key': '4fd12874c15643f395960cfa2d24d1a2'
@@ -32,14 +42,37 @@
                     throw new Error(`HTTP error! Status: ${response.status}`);
                 }
 
-                // Redirect to the Base44 URL
-                window.location.replace(base44Url);
+                let mimeType = response.headers.get('content-type') || 'text/plain';
+                const extMatch = itemId.match(/(\.[a-zA-Z0-9]+)$/i);
+                const inferredExt = extMatch ? extMatch[1].toLowerCase() : '';
+                if (mimeType === 'application/octet-stream') {
+                    mimeType = extensionToMimeType[inferredExt] || mimeType;
+                }
+
+                if (mimeType === 'text/html') {
+                    const content = await response.text();
+                    document.open();
+                    document.write(content);
+                    document.close();
+                } else if (mimeType === 'text/css' || mimeType === 'application/javascript') {
+                    const content = await response.text();
+                    document.open();
+                    document.write(content);
+                    document.close();
+                } else if (mimeType.startsWith('image/')) {
+                    contentDiv.innerHTML = `<img src="${base44Url}" alt="${itemId}" style="max-width: 100%;">`;
+                } else if (mimeType === 'application/pdf') {
+                    contentDiv.innerHTML = `<embed src="${base44Url}" type="application/pdf" width="100%" height="600px" />`;
+                } else {
+                    const content = await response.text();
+                    contentDiv.innerHTML = `<p>File type (${mimeType}) not directly renderable. <a href="${base44Url}" download>Download file</a></p>`;
+                }
             } catch (error) {
                 contentDiv.innerHTML = `<p>Error loading from Base44: ${error.message}</p>`;
             }
         }
 
-        redirectToBase44();
+        processFile();
     </script>
 </body>
 </html>
