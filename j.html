@@ -65,20 +65,39 @@
                 console.error('Base44 API error:', error);
                 contentDiv.innerHTML = `<p>Base44 API error: ${error.message}. Trying Supabase fallback...</p>`;
 
-                // Fallback to Supabase
-                try {
-                    const supabaseUrl = `https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/${itemId}${itemId.endsWith('.css') ? '' : '.css'}`;
+                // Fallback to Supabase with multiple extension attempts
+                const baseSupabaseUrl = 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/';
+                const possibleExtensions = ['', '.css', '.html', '.js', '.png', '.jpg', '.jpeg', '.pdf']; // Add more if needed
+                let lastError = null;
+
+                for (const ext of possibleExtensions) {
+                    const supabaseUrl = `${baseSupabaseUrl}${itemId}${ext}`;
                     console.log('Attempting Supabase fetch:', supabaseUrl);
-                    const response = await fetch(supabaseUrl);
-                    if (!response.ok) {
-                        throw new Error(`Supabase HTTP error! Status: ${response.status}`);
+                    try {
+                        const response = await fetch(supabaseUrl);
+                        if (!response.ok) {
+                            throw new Error(`Supabase HTTP error! Status: ${response.status}`);
+                        }
+                        const content = await response.text();
+                        const mimeType = response.headers.get('content-type') || 'text/plain';
+
+                        // Determine rendering based on Content-Type
+                        if (mimeType.startsWith('image/')) {
+                            contentDiv.innerHTML = `<img src="${supabaseUrl}" alt="Image" style="max-width: 100%;">`;
+                        } else if (mimeType === 'application/pdf') {
+                            contentDiv.innerHTML = `<embed src="${supabaseUrl}" type="application/pdf" width="100%" height="600px" />`;
+                        } else if (mimeType.startsWith('text/') || mimeType === 'application/javascript') {
+                            contentDiv.innerHTML = `<pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">${content}</pre>`;
+                        } else {
+                            contentDiv.innerHTML = `<p>File type (${mimeType}) not directly renderable. <a href="${supabaseUrl}" download>Download file</a></p>`;
+                        }
+                        return; // Success, exit loop
+                    } catch (supabaseError) {
+                        console.error(`Supabase error for ${supabaseUrl}:`, supabaseError);
+                        lastError = supabaseError;
                     }
-                    const content = await response.text();
-                    contentDiv.innerHTML = `<pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">${content}</pre>`;
-                } catch (supabaseError) {
-                    console.error('Supabase error:', supabaseError);
-                    contentDiv.innerHTML = `<p>Error loading from Supabase: ${supabaseError.message}</p>`;
                 }
+                contentDiv.innerHTML = `<p>Error loading from Supabase: ${lastError.message}</p>`;
             }
         }
 
