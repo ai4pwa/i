@@ -6,9 +6,9 @@
     <title>Dynamic File Loader</title>
     <style>
         body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        img { max-width: 100%; height: auto; }
         #content { width: 100%; max-width: 1200px; padding: 20px; }
         .error { color: red; font-weight: bold; }
-        .info { color: blue; }
     </style>
 </head>
 <body>
@@ -25,9 +25,8 @@
             return filename.split('.').pop().toLowerCase();
         }
 
-        // Base URLs for fetching files
+        // Base URL for fetching files
         const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
-        const supabaseBaseUrl = 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/';
 
         // Get the page parameter from URL
         const page = getQueryParam('page');
@@ -35,57 +34,59 @@
 
         if (page) {
             const extension = getFileExtension(page);
-            let fileUrl;
+            const fileUrl = baseUrl + page;
 
-            // Use Supabase URL for images, base44.app for other files
+            console.log('Attempting to load:', fileUrl); // Debugging
+
             if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                fileUrl = supabaseBaseUrl + page;
-                console.log('Redirecting to image:', fileUrl);
-                // Redirect to Supabase URL for images to attempt inline display
-                window.location.href = fileUrl;
+                // Handle image files
+                const img = document.createElement('img');
+                img.src = fileUrl;
+                img.alt = 'Loaded image';
+                img.onerror = () => {
+                    contentDiv.innerHTML = '<p class="error">Failed to load image. Check CORS or file availability.</p>';
+                    console.error('Image load failed:', fileUrl);
+                };
+                img.onload = () => console.log('Image loaded successfully:', fileUrl);
+                contentDiv.appendChild(img);
+            } else if (extension === 'js') {
+                // Handle JavaScript files
+                const script = document.createElement('script');
+                script.src = fileUrl;
+                script.onerror = () => {
+                    contentDiv.innerHTML = '<p class="error">Failed to load script. Check CORS or file availability.</p>';
+                    console.error('Script load failed:', fileUrl);
+                };
+                document.body.appendChild(script);
+            } else if (extension === 'html') {
+                // Handle HTML files
+                fetch(fileUrl)
+                    .then(response => {
+                        if (!response.ok) throw new Error('HTTP error ' + response.status);
+                        return response.text();
+                    })
+                    .then(data => {
+                        contentDiv.innerHTML = data;
+                        console.log('HTML loaded successfully:', fileUrl);
+                    })
+                    .catch(error => {
+                        contentDiv.innerHTML = '<p class="error">Error loading HTML content: ' + error.message + '</p>';
+                        console.error('HTML load failed:', fileUrl, error);
+                    });
+            } else if (extension === 'css') {
+                // Handle CSS files
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = fileUrl;
+                link.onerror = () => {
+                    contentDiv.innerHTML = '<p class="error">Failed to load CSS. Check CORS or file availability.</p>';
+                    console.error('CSS load failed:', fileUrl);
+                };
+                document.head.appendChild(link);
+                contentDiv.innerHTML = '<p>CSS file applied. Check document styles.</p>';
             } else {
-                fileUrl = baseUrl + page;
-                console.log('Processing file:', fileUrl); // Debugging
-
-                if (extension === 'js') {
-                    // Handle JavaScript files
-                    const script = document.createElement('script');
-                    script.src = fileUrl;
-                    script.onerror = () => {
-                        contentDiv.innerHTML = '<p class="error">Failed to load script. Check CORS or file availability: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
-                        console.error('Script load failed:', fileUrl);
-                    };
-                    document.body.appendChild(script);
-                } else if (extension === 'html') {
-                    // Handle HTML files
-                    fetch(fileUrl)
-                        .then(response => {
-                            if (!response.ok) throw new Error('HTTP error ' + response.status);
-                            return response.text();
-                        })
-                        .then(data => {
-                            contentDiv.innerHTML = data;
-                            console.log('HTML loaded successfully:', fileUrl);
-                        })
-                        .catch(error => {
-                            contentDiv.innerHTML = '<p class="error">Error loading HTML content: ' + error.message + '. Check: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
-                            console.error('HTML load failed:', fileUrl, error);
-                        });
-                } else if (extension === 'css') {
-                    // Handle CSS files
-                    const link = document.createElement('link');
-                    link.rel = 'stylesheet';
-                    link.href = fileUrl;
-                    link.onerror = () => {
-                        contentDiv.innerHTML = '<p class="error">Failed to load CSS. Check CORS or file availability: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
-                        console.error('CSS load failed:', fileUrl);
-                    };
-                    document.head.appendChild(link);
-                    contentDiv.innerHTML = '<p class="info">CSS file applied. Check document styles.</p>';
-                } else {
-                    contentDiv.innerHTML = '<p class="error">Unsupported file type: ' + extension + '</p>';
-                    console.error('Unsupported file type:', extension);
-                }
+                contentDiv.innerHTML = '<p class="error">Unsupported file type: ' + extension + '</p>';
+                console.error('Unsupported file type:', extension);
             }
         } else {
             contentDiv.innerHTML = '<p class="error">No file specified in URL.</p>';
