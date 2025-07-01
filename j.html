@@ -1,94 +1,63 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>j.html viewer</title>
-  <style>
-    body {
-      font-family: monospace;
-      white-space: pre-wrap;
-      padding: 1rem;
-    }
-    img, iframe {
-      max-width: 100%;
-      height: auto;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Render Base44 StorageItem</title>
+    <script src="https://unpkg.com/@base44/sdk@0.1.2/dist/index.js"></script>
 </head>
 <body>
-  <div id="output">🔄 Loading...</div>
+    <div id="content"></div>
+    <script>
+        // Initialize Base44 client
+        const base44 = createClient({ appId: '686424824d7b61721eac3e29' });
 
-  <script>
-    const page = new URLSearchParams(location.search).get("page");
-    const apiKey = "4fd12874c15643f395960cfa2d24d1a2";
-    const appId = "686424824d7b61721eac3e29";
-    const output = document.getElementById("output");
+        // Get the 'page' query parameter from the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const itemId = urlParams.get('page');
 
-    if (!page) {
-      output.textContent = "❌ Missing ?page=FILENAME";
-      throw new Error("Missing filename");
-    }
+        async function fetchAndRenderStorageItem() {
+            const contentDiv = document.getElementById('content');
 
-    fetch(`https://app.base44.com/api/apps/${appId}/entities/StorageItem`, {
-      headers: {
-        "api_key": apiKey,
-        "Content-Type": "application/json"
-      }
-    })
-    .then(res => res.json())
-    .then(data => {
-      console.log("Available files:", data.map(f => f.name)); // For debugging
-      const file = data.find(f => f.name?.toLowerCase() === page.toLowerCase());
-      if (!file) {
-        output.textContent = "❌ File not found: " + page;
-        return;
-      }
+            if (!itemId) {
+                contentDiv.innerHTML = '<p>No page specified in the URL.</p>';
+                return;
+            }
 
-      const mime = file.mime_type || "";
-      const content = file.content;
-      const fileUrl = file.file_url;
+            try {
+                // Fetch StorageItem by ID using Base44 SDK
+                const results = await base44.entities.StorageItem.filter({ id: itemId });
 
-      if (content && (mime.includes("text/") || mime.includes("css") || mime.includes("javascript"))) {
-        if (mime.includes("html")) {
-          const blob = new Blob([content], { type: "text/html" });
-          const url = URL.createObjectURL(blob);
-          location.href = url;
-        } else if (mime.includes("css")) {
-          const style = document.createElement("style");
-          style.textContent = content;
-          document.head.appendChild(style);
-          output.textContent = "✅ CSS loaded.";
-        } else if (mime.includes("javascript")) {
-          const script = document.createElement("script");
-          script.textContent = content;
-          document.body.appendChild(script);
-          output.textContent = "✅ JS loaded.";
-        } else {
-          output.textContent = content;
+                if (!results || results.length === 0) {
+                    contentDiv.innerHTML = '<p>No StorageItem found for the specified ID.</p>';
+                    return;
+                }
+
+                const item = results[0]; // Get the first matching StorageItem
+                const mimeType = item.mime_type || 'text/plain';
+
+                // Handle different file types
+                if (mimeType.startsWith('image/')) {
+                    // Render images using file_url
+                    contentDiv.innerHTML = `<img src="${item.file_url}" alt="${item.name || 'Image'}" style="max-width: 100%;">`;
+                } else if (mimeType.startsWith('text/') || mimeType === 'application/javascript' || mimeType === 'text/html' || mimeType === 'text/css') {
+                    // Render text-based files (HTML, CSS, JS, TXT) using content
+                    contentDiv.innerHTML = `<pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">${item.content || 'No content available'}</pre>`;
+                } else if (mimeType === 'application/pdf') {
+                    // Render PDFs using an embed tag
+                    contentDiv.innerHTML = `<embed src="${item.file_url}" type="application/pdf" width="100%" height="600px" />`;
+                } else {
+                    // Fallback for other file types (e.g., provide a download link)
+                    contentDiv.innerHTML = `<p>File type (${mimeType}) not directly renderable. <a href="${item.file_url}" download>Download ${item.name || 'file'}</a></p>`;
+                }
+            } catch (error) {
+                console.error('Error fetching StorageItem:', error);
+                contentDiv.innerHTML = `<p>Error loading content: ${error.message}</p>`;
+            }
         }
-      } else if (fileUrl) {
-        if (mime.startsWith("image/")) {
-          const img = new Image();
-          img.src = fileUrl;
-          output.innerHTML = "";
-          output.appendChild(img);
-        } else if (mime === "application/pdf") {
-          const iframe = document.createElement("iframe");
-          iframe.src = fileUrl;
-          iframe.style.width = "100%";
-          iframe.style.height = "90vh";
-          output.innerHTML = "";
-          output.appendChild(iframe);
-        } else {
-          location.href = fileUrl;
-        }
-      } else {
-        output.textContent = "❌ File has no usable content or URL.";
-      }
-    })
-    .catch(err => {
-      output.textContent = "❌ Error: " + err.message;
-    });
-  </script>
+
+        // Execute the fetch and render function
+        fetchAndRenderStorageItem();
+    </script>
 </body>
 </html>
