@@ -32,14 +32,42 @@
         const page = getQueryParam('page');
         const contentDiv = document.getElementById('content');
 
+        // Check if the request is likely from an <img> tag
+        const isImageRequest = (window.location.href.indexOf('page=') !== -1 && 
+                               getFileExtension(page).match(/jpg|jpeg|png/)) && 
+                               !window.navigator.userAgent.includes('Mozilla');
+
         if (page) {
             const extension = getFileExtension(page);
             const fileUrl = baseUrl + page;
 
-            console.log('Attempting to load:', fileUrl); // Debugging
+            console.log('Attempting to load:', fileUrl);
 
-            if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Handle image files
+            if (isImageRequest && (extension === 'jpg' || extension === 'jpeg' || extension === 'png')) {
+                // Handle image requests for <img> tags by returning Base64
+                fetch(fileUrl)
+                    .then(response => {
+                        if (!response.ok) throw new Error('HTTP error ' + response.status);
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            // Redirect to Base64 data URI
+                            window.location.href = reader.result;
+                        };
+                        reader.onerror = () => {
+                            document.write('<p class="error">Failed to encode image.</p>');
+                            console.error('Base64 encoding failed:', fileUrl);
+                        };
+                        reader.readAsDataURL(blob);
+                    })
+                    .catch(error => {
+                        document.write('<p class="error">Error loading image: ' + error.message + '</p>');
+                        console.error('Image load failed:', fileUrl, error);
+                    });
+            } else if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
+                // Handle image files for direct browser navigation
                 const img = document.createElement('img');
                 img.src = fileUrl;
                 img.alt = 'Loaded image';
