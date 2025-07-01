@@ -16,6 +16,17 @@
         const itemId = urlParams.get('page');
         console.log('itemId:', itemId);
 
+        // Map extensions to MIME types for inference
+        const extensionToMimeType = {
+            '.css': 'text/css',
+            '.html': 'text/html',
+            '.js': 'application/javascript',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.pdf': 'application/pdf'
+        };
+
         async function fetchAndRenderStorageItem() {
             const contentDiv = document.getElementById('content');
             contentDiv.innerHTML = '<p>Loading...</p>';
@@ -65,9 +76,9 @@
                 console.error('Base44 API error:', error);
                 contentDiv.innerHTML = `<p>Base44 API error: ${error.message}. Trying Supabase fallback...</p>`;
 
-                // Fallback to Supabase with multiple extension attempts
+                // Fallback to Supabase
                 const baseSupabaseUrl = 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/';
-                const possibleExtensions = ['', '.css', '.html', '.js', '.png', '.jpg', '.jpeg', '.pdf']; // Add more if needed
+                const possibleExtensions = ['', '.css', '.html', '.js', '.png', '.jpg', '.jpeg', '.pdf'];
                 let lastError = null;
 
                 for (const ext of possibleExtensions) {
@@ -79,9 +90,17 @@
                             throw new Error(`Supabase HTTP error! Status: ${response.status}`);
                         }
                         const content = await response.text();
-                        const mimeType = response.headers.get('content-type') || 'text/plain';
+                        let mimeType = response.headers.get('content-type') || 'text/plain';
 
-                        // Determine rendering based on Content-Type
+                        // Infer MIME type from extension if application/octet-stream
+                        if (mimeType === 'application/octet-stream') {
+                            const extMatch = itemId.match(/(\.[a-zA-Z0-9]+)$/i);
+                            const inferredExt = extMatch ? extMatch[1].toLowerCase() : ext;
+                            mimeType = extensionToMimeType[inferredExt] || mimeType;
+                            console.log('Inferred MIME type:', mimeType);
+                        }
+
+                        // Render based on MIME type
                         if (mimeType.startsWith('image/')) {
                             contentDiv.innerHTML = `<img src="${supabaseUrl}" alt="Image" style="max-width: 100%;">`;
                         } else if (mimeType === 'application/pdf') {
