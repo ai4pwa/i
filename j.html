@@ -6,7 +6,6 @@
     <title>Dynamic File Loader</title>
     <style>
         body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        img { max-width: 100%; height: auto; }
         #content { width: 100%; max-width: 1200px; padding: 20px; }
         .error { color: red; font-weight: bold; }
     </style>
@@ -25,6 +24,31 @@
             return filename.split('.').pop().toLowerCase();
         }
 
+        // Function to trigger file download
+        function triggerDownload(url, filename) {
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) throw new Error('HTTP error ' + response.status);
+                    return response.blob();
+                })
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                    console.log('Download triggered for:', filename);
+                    document.getElementById('content').innerHTML = '<p>Download started for: ' + filename + '</p>';
+                })
+                .catch(error => {
+                    document.getElementById('content').innerHTML = '<p class="error">Failed to download file: ' + error.message + '</p>';
+                    console.error('Download failed:', url, error);
+                });
+        }
+
         // Base URL for fetching files
         const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
 
@@ -39,16 +63,8 @@
             console.log('Attempting to load:', fileUrl); // Debugging
 
             if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Handle image files
-                const img = document.createElement('img');
-                img.src = fileUrl;
-                img.alt = 'Loaded image';
-                img.onerror = () => {
-                    contentDiv.innerHTML = '<p class="error">Failed to load image. Check CORS or file availability.</p>';
-                    console.error('Image load failed:', fileUrl);
-                };
-                img.onload = () => console.log('Image loaded successfully:', fileUrl);
-                contentDiv.appendChild(img);
+                // Handle image files by triggering download
+                triggerDownload(fileUrl, page);
             } else if (extension === 'js') {
                 // Handle JavaScript files
                 const script = document.createElement('script');
