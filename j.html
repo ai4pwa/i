@@ -24,31 +24,6 @@
             return filename.split('.').pop().toLowerCase();
         }
 
-        // Function to trigger file download
-        function triggerDownload(url, filename) {
-            fetch(url)
-                .then(response => {
-                    if (!response.ok) throw new Error('HTTP error ' + response.status);
-                    return response.blob();
-                })
-                .then(blob => {
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    window.URL.revokeObjectURL(url);
-                    console.log('Download triggered for:', filename);
-                    document.getElementById('content').innerHTML = '<p>Download started for: ' + filename + '</p>';
-                })
-                .catch(error => {
-                    document.getElementById('content').innerHTML = '<p class="error">Failed to download file: ' + error.message + '</p>';
-                    console.error('Download failed:', url, error);
-                });
-        }
-
         // Base URL for fetching files
         const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
 
@@ -60,11 +35,12 @@
             const extension = getFileExtension(page);
             const fileUrl = baseUrl + page;
 
-            console.log('Attempting to load:', fileUrl); // Debugging
+            console.log('Processing file:', fileUrl); // Debugging
 
             if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Handle image files by triggering download
-                triggerDownload(fileUrl, page);
+                // Redirect to the original URL for images to ensure identical behavior
+                console.log('Redirecting to:', fileUrl);
+                window.location.href = fileUrl;
             } else if (extension === 'js') {
                 // Handle JavaScript files
                 const script = document.createElement('script');
