@@ -25,24 +25,6 @@
             return filename.split('.').pop().toLowerCase();
         }
 
-        // Function to trigger file download using <a> element
-        function triggerDownload(url, filename) {
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename; // Encourage download, respecting server headers
-            a.style.display = 'none';
-            document.body.appendChild(a);
-            try {
-                a.click();
-                console.log('Download triggered for:', filename);
-                document.getElementById('content').innerHTML = '<p class="info">Download started for: ' + filename + '. If no download occurs, check console for errors or try the direct link: <a href="' + url + '">' + url + '</a></p>';
-            } catch (error) {
-                document.getElementById('content').innerHTML = '<p class="error">Failed to trigger download: ' + error.message + '. Try the direct link: <a href="' + url + '">' + url + '</a></p>';
-                console.error('Download trigger failed:', url, error);
-            }
-            document.body.removeChild(a);
-        }
-
         // Base URLs for fetching files
         const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
         const supabaseBaseUrl = 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/';
@@ -58,53 +40,52 @@
             // Use Supabase URL for images, base44.app for other files
             if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
                 fileUrl = supabaseBaseUrl + page;
+                console.log('Redirecting to image:', fileUrl);
+                // Redirect to Supabase URL for images to attempt inline display
+                window.location.href = fileUrl;
             } else {
                 fileUrl = baseUrl + page;
-            }
+                console.log('Processing file:', fileUrl); // Debugging
 
-            console.log('Processing file:', fileUrl); // Debugging
-
-            if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Trigger download for images using Supabase URL
-                triggerDownload(fileUrl, page);
-            } else if (extension === 'js') {
-                // Handle JavaScript files
-                const script = document.createElement('script');
-                script.src = fileUrl;
-                script.onerror = () => {
-                    contentDiv.innerHTML = '<p class="error">Failed to load script. Check CORS or file availability: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
-                    console.error('Script load failed:', fileUrl);
-                };
-                document.body.appendChild(script);
-            } else if (extension === 'html') {
-                // Handle HTML files
-                fetch(fileUrl)
-                    .then(response => {
-                        if (!response.ok) throw new Error('HTTP error ' + response.status);
-                        return response.text();
-                    })
-                    .then(data => {
-                        contentDiv.innerHTML = data;
-                        console.log('HTML loaded successfully:', fileUrl);
-                    })
-                    .catch(error => {
-                        contentDiv.innerHTML = '<p class="error">Error loading HTML content: ' + error.message + '. Check: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
-                        console.error('HTML load failed:', fileUrl, error);
-                    });
-            } else if (extension === 'css') {
-                // Handle CSS files
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = fileUrl;
-                link.onerror = () => {
-                    contentDiv.innerHTML = '<p class="error">Failed to load CSS. Check CORS or file availability: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
-                    console.error('CSS load failed:', fileUrl);
-                };
-                document.head.appendChild(link);
-                contentDiv.innerHTML = '<p class="info">CSS file applied. Check document styles.</p>';
-            } else {
-                contentDiv.innerHTML = '<p class="error">Unsupported file type: ' + extension + '</p>';
-                console.error('Unsupported file type:', extension);
+                if (extension === 'js') {
+                    // Handle JavaScript files
+                    const script = document.createElement('script');
+                    script.src = fileUrl;
+                    script.onerror = () => {
+                        contentDiv.innerHTML = '<p class="error">Failed to load script. Check CORS or file availability: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
+                        console.error('Script load failed:', fileUrl);
+                    };
+                    document.body.appendChild(script);
+                } else if (extension === 'html') {
+                    // Handle HTML files
+                    fetch(fileUrl)
+                        .then(response => {
+                            if (!response.ok) throw new Error('HTTP error ' + response.status);
+                            return response.text();
+                        })
+                        .then(data => {
+                            contentDiv.innerHTML = data;
+                            console.log('HTML loaded successfully:', fileUrl);
+                        })
+                        .catch(error => {
+                            contentDiv.innerHTML = '<p class="error">Error loading HTML content: ' + error.message + '. Check: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
+                            console.error('HTML load failed:', fileUrl, error);
+                        });
+                } else if (extension === 'css') {
+                    // Handle CSS files
+                    const link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.href = fileUrl;
+                    link.onerror = () => {
+                        contentDiv.innerHTML = '<p class="error">Failed to load CSS. Check CORS or file availability: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
+                        console.error('CSS load failed:', fileUrl);
+                    };
+                    document.head.appendChild(link);
+                    contentDiv.innerHTML = '<p class="info">CSS file applied. Check document styles.</p>';
+                } else {
+                    contentDiv.innerHTML = '<p class="error">Unsupported file type: ' + extension + '</p>';
+                    console.error('Unsupported file type:', extension);
+                }
             }
         } else {
             contentDiv.innerHTML = '<p class="error">No file specified in URL.</p>';
