@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Render Base44 StorageItem</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
 </head>
 <body>
     <div id="content"></div>
@@ -25,7 +26,8 @@
             }
 
             try {
-                // Direct fetch to Base44 API
+                // Try Base44 API
+                console.log('Attempting Base44 API fetch');
                 const response = await fetch(`https://app.base44.com/api/apps/686424824d7b61721eac3e29/entities/StorageItem?id=${itemId}`, {
                     headers: {
                         'api_key': '4fd12874c15643f395960cfa2d24d1a2',
@@ -33,7 +35,7 @@
                     }
                 });
                 console.log('API response status:', response.status);
-                
+
                 if (!response.ok) {
                     throw new Error(`HTTP error! Status: ${response.status}`);
                 }
@@ -42,8 +44,7 @@
                 console.log('API response data:', results);
 
                 if (!results || results.length === 0) {
-                    contentDiv.innerHTML = '<p>No StorageItem found for the specified ID.</p>';
-                    return;
+                    throw new Error('No StorageItem found for the specified ID');
                 }
 
                 const item = results[0];
@@ -61,8 +62,23 @@
                     contentDiv.innerHTML = `<p>File type (${mimeType}) not directly renderable. <a href="${item.file_url}" download>Download ${item.name || 'file'}</a></p>`;
                 }
             } catch (error) {
-                console.error('Error fetching StorageItem:', error);
-                contentDiv.innerHTML = `<p>Error loading content: ${error.message}</p>`;
+                console.error('Base44 API error:', error);
+                contentDiv.innerHTML = `<p>Base44 API error: ${error.message}. Trying Supabase fallback...</p>`;
+
+                // Fallback to Supabase
+                try {
+                    const supabaseUrl = `https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/${itemId}${itemId.endsWith('.css') ? '' : '.css'}`;
+                    console.log('Attempting Supabase fetch:', supabaseUrl);
+                    const response = await fetch(supabaseUrl);
+                    if (!response.ok) {
+                        throw new Error(`Supabase HTTP error! Status: ${response.status}`);
+                    }
+                    const content = await response.text();
+                    contentDiv.innerHTML = `<pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">${content}</pre>`;
+                } catch (supabaseError) {
+                    console.error('Supabase error:', supabaseError);
+                    contentDiv.innerHTML = `<p>Error loading from Supabase: ${supabaseError.message}</p>`;
+                }
             }
         }
 
