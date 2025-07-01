@@ -2,33 +2,72 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Dynamic Page Viewer</title>
+  <title>File Viewer</title>
 </head>
 <body>
+  <div id="viewer">Loading...</div>
+
   <script>
-    // Step 1: Get `page` parameter from the URL
-    const params = new URLSearchParams(window.location.search);
-    const page = params.get('page');
+    const params = new URLSearchParams(location.search);
+    const page = params.get("page");
 
-    // Step 2: Build the Supabase URL (with `.html` suffix)
-    if (page) {
-      const baseURL = 'https://base44.app/api/apps/6863cdf437ac82672a3bff47/files/';
-      const fullURL = `${baseURL}${page}.html`;
-
-      // Step 3: Fetch and display full HTML content
-      fetch(fullURL)
-        .then(response => response.text())
-        .then(html => {
-          document.open();
-          document.write(html);
-          document.close();
-        })
-        .catch(error => {
-          document.body.innerHTML = `<h2>Failed to load page: ${page}</h2><p>${error}</p>`;
-        });
-    } else {
-      document.body.innerHTML = "<h2>Missing ?page= parameter in the URL</h2>";
+    if (!page) {
+      document.getElementById("viewer").innerText = "Missing ?page= parameter.";
+      throw new Error("No page param");
     }
+
+    const ext = page.split('.').pop().toLowerCase();
+    const base = 'https://base44.app/api/apps/6863cdf437ac82672a3bff47/files/';
+    const fileUrl = `${base}${page}`;
+
+    const render = {
+      html: () => {
+        fetch(fileUrl)
+          .then(res => res.text())
+          .then(html => {
+            document.open();
+            document.write(html);
+            document.close();
+          })
+          .catch(err => {
+            document.body.innerHTML = `<h2>Error loading HTML: ${err}</h2>`;
+          });
+      },
+      js: () => {
+        const script = document.createElement("script");
+        script.src = fileUrl;
+        script.type = "text/javascript";
+        script.onload = () => document.getElementById("viewer").remove();
+        document.body.appendChild(script);
+      },
+      css: () => {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = fileUrl;
+        document.head.appendChild(link);
+        document.getElementById("viewer").innerText = "CSS loaded.";
+      },
+      png: imgHandler,
+      jpg: imgHandler,
+      jpeg: imgHandler,
+      gif: imgHandler,
+      svg: imgHandler,
+      webp: imgHandler
+    };
+
+    function imgHandler() {
+      const img = document.createElement("img");
+      img.src = fileUrl;
+      img.alt = page;
+      img.style.maxWidth = "100%";
+      document.getElementById("viewer").innerHTML = "";
+      document.getElementById("viewer").appendChild(img);
+    }
+
+    (render[ext] || function () {
+      document.getElementById("viewer").innerText = `Unsupported file type: .${ext}`;
+    })();
+
   </script>
 </body>
 </html>
