@@ -2,80 +2,90 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>File Loader</title>
+  <title>File Viewer</title>
   <style>
-    body { font-family: sans-serif; padding: 2rem; }
-    img { max-width: 100%; }
+    html, body {
+      margin: 0; padding: 1rem;
+      font-family: monospace;
+      background: #fff; color: #000;
+      white-space: pre-wrap;
+    }
   </style>
 </head>
 <body>
-  <div id="app">Loading...</div>
+  <div id="output">Loading...</div>
 
   <script>
     const page = new URLSearchParams(location.search).get("page");
-    const app = document.getElementById("app");
+    const apiKey = "4fd12874c15643f395960cfa2d24d1a2";
+    const appId = "686424824d7b61721eac3e29";
 
     if (!page) {
-      app.innerHTML = "<p>Missing <code>?page=</code> parameter.</p>";
-      throw new Error("Missing ?page=");
+      document.body.textContent = "❌ Missing ?page=filename.ext";
+      throw new Error("Missing file name");
     }
 
-    const ext = page.split('.').pop().toLowerCase();
-    const fileUrl = `https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/${page}`;
-
-    const injectors = {
-      html: () => {
-        fetch(fileUrl)
-          .then(r => r.text())
-          .then(html => {
-            document.open();
-            document.write(html);
-            document.close();
-          });
-      },
-      css: () => {
-        fetch(fileUrl)
-          .then(r => r.text())
-          .then(css => {
-            const style = document.createElement("style");
-            style.textContent = css;
-            document.head.appendChild(style);
-            app.innerHTML = "<p>CSS loaded and applied dynamically.</p>";
-          });
-      },
-      js: () => {
-        fetch(fileUrl)
-          .then(r => r.text())
-          .then(js => {
-            const script = document.createElement("script");
-            script.textContent = js;
-            document.body.appendChild(script);
-            app.innerHTML = "<p>JavaScript loaded and executed.</p>";
-          });
-      },
-      png: () => renderImage(fileUrl),
-      jpg: () => renderImage(fileUrl),
-      jpeg: () => renderImage(fileUrl),
-      gif: () => renderImage(fileUrl),
-      svg: () => renderImage(fileUrl),
-      webp: () => renderImage(fileUrl),
-      default: () => {
-        fetch(fileUrl)
-          .then(r => r.text())
-          .then(text => {
-            app.innerHTML = `<pre style="white-space: pre-wrap;">${text}</pre>`;
-          });
+    fetch(`https://app.base44.com/api/apps/${appId}/entities/StorageItem?name=${encodeURIComponent(page)}`, {
+      headers: {
+        "api_key": apiKey,
+        "Content-Type": "application/json"
       }
-    };
+    })
+    .then(res => res.json())
+    .then(results => {
+      const file = results.find(x => x.name === page);
+      if (!file) throw new Error("File not found");
 
-    function renderImage(url) {
-      const img = document.createElement("img");
-      img.src = url;
-      app.innerHTML = "";
-      app.appendChild(img);
-    }
+      const mime = file.mime_type || "text/plain";
+      const content = file.content;
+      const url = file.file_url;
 
-    (injectors[ext] || injectors.default)();
+      // Handle text-based files
+      if (content && mime.startsWith("text/") || mime.includes("javascript") || mime.includes("json")) {
+        const blob = new Blob([content], { type: mime });
+        const objectURL = URL.createObjectURL(blob);
+
+        // Inject correct Content-Type using Blob
+        if (mime === "text/html") {
+          // Replace entire document for HTML
+          location.href = objectURL;
+        } else if (mime === "text/css") {
+          const style = document.createElement("style");
+          style.textContent = content;
+          document.head.appendChild(style);
+          document.body.textContent = "✅ CSS loaded via content";
+        } else if (mime.includes("javascript")) {
+          const script = document.createElement("script");
+          script.textContent = content;
+          document.body.appendChild(script);
+          document.body.append("✅ JS executed via content");
+        } else {
+          // Generic text viewer
+          document.body.textContent = content;
+        }
+      }
+
+      // Fallback: Open binary files via file_url
+      else if (url) {
+        // Render image directly
+        if (mime.startsWith("image/")) {
+          const img = new Image();
+          img.src = url;
+          img.style.maxWidth = "100%";
+          document.body.innerHTML = "";
+          document.body.appendChild(img);
+        }
+        // Open PDF or download file
+        else {
+          location.href = url;
+        }
+      } else {
+        throw new Error("No content or file_url available");
+      }
+    })
+    .catch(err => {
+      document.body.textContent = "❌ " + err.message;
+    });
   </script>
 </body>
 </html>
