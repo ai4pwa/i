@@ -37,7 +37,8 @@
     })
     .then(res => res.json())
     .then(data => {
-      const file = data.find(f => f.name === page);
+      console.log("Available files:", data.map(f => f.name)); // For debugging
+      const file = data.find(f => f.name?.toLowerCase() === page.toLowerCase());
       if (!file) {
         output.textContent = "❌ File not found: " + page;
         return;
@@ -48,7 +49,6 @@
       const fileUrl = file.file_url;
 
       if (content && (mime.includes("text/") || mime.includes("css") || mime.includes("javascript"))) {
-        // TEXT-BASED FILES
         if (mime.includes("html")) {
           const blob = new Blob([content], { type: "text/html" });
           const url = URL.createObjectURL(blob);
@@ -67,7 +67,6 @@
           output.textContent = content;
         }
       } else if (fileUrl) {
-        // BINARY FILES
         if (mime.startsWith("image/")) {
           const img = new Image();
           img.src = fileUrl;
