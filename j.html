@@ -32,6 +32,12 @@
                 return;
             }
 
+            // Check if itemId is an HTML file and redirect immediately
+            if (itemId.toLowerCase().endsWith('.html')) {
+                window.location.replace(`https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/${itemId}`);
+                return;
+            }
+
             try {
                 // Try Base44 API
                 const response = await fetch(`https://app.base44.com/api/apps/686424824d7b61721eac3e29/entities/StorageItem?id=${itemId}`, {
@@ -69,7 +75,7 @@
             } catch (error) {
                 // Fallback to Supabase
                 const baseSupabaseUrl = 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/';
-                const possibleExtensions = ['', '.css', '.html', '.js', '.png', '.jpg', '.jpeg', '.pdf'];
+                const possibleExtensions = ['', '.css', '.js', '.png', '.jpg', '.jpeg', '.pdf'];
                 let lastError = null;
 
                 for (const ext of possibleExtensions) {
@@ -90,10 +96,7 @@
                         }
 
                         // Render based on MIME type
-                        if (mimeType === 'text/html') {
-                            document.write(content); // Load HTML as-is
-                            return;
-                        } else if (mimeType.startsWith('image/')) {
+                        if (mimeType.startsWith('image/')) {
                             contentDiv.innerHTML = `<img src="${supabaseUrl}" alt="Image" style="max-width: 100%;">`;
                         } else if (mimeType === 'application/pdf') {
                             contentDiv.innerHTML = `<embed src="${supabaseUrl}" type="application/pdf" width="100%" height="600px" />`;
