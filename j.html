@@ -8,6 +8,7 @@
         body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         #content { width: 100%; max-width: 1200px; padding: 20px; }
         .error { color: red; font-weight: bold; }
+        .info { color: blue; }
     </style>
 </head>
 <body>
@@ -22,6 +23,24 @@
         // Function to get file extension from filename
         function getFileExtension(filename) {
             return filename.split('.').pop().toLowerCase();
+        }
+
+        // Function to trigger file download using <a> element
+        function triggerDownload(url, filename) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename; // Encourage download, respecting server headers
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            try {
+                a.click();
+                console.log('Download triggered for:', filename);
+                document.getElementById('content').innerHTML = '<p class="info">Download started for: ' + filename + '. If no download occurs, check console for errors or try the direct link: <a href="' + url + '">' + url + '</a></p>';
+            } catch (error) {
+                document.getElementById('content').innerHTML = '<p class="error">Failed to trigger download: ' + error.message + '. Try the direct link: <a href="' + url + '">' + url + '</a></p>';
+                console.error('Download trigger failed:', url, error);
+            }
+            document.body.removeChild(a);
         }
 
         // Base URLs for fetching files
@@ -46,15 +65,14 @@
             console.log('Processing file:', fileUrl); // Debugging
 
             if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Redirect to Supabase URL for images to trigger download
-                console.log('Redirecting to:', fileUrl);
-                window.location.href = fileUrl;
+                // Trigger download for images using Supabase URL
+                triggerDownload(fileUrl, page);
             } else if (extension === 'js') {
                 // Handle JavaScript files
                 const script = document.createElement('script');
                 script.src = fileUrl;
                 script.onerror = () => {
-                    contentDiv.innerHTML = '<p class="error">Failed to load script. Check CORS or file availability.</p>';
+                    contentDiv.innerHTML = '<p class="error">Failed to load script. Check CORS or file availability: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
                     console.error('Script load failed:', fileUrl);
                 };
                 document.body.appendChild(script);
@@ -70,7 +88,7 @@
                         console.log('HTML loaded successfully:', fileUrl);
                     })
                     .catch(error => {
-                        contentDiv.innerHTML = '<p class="error">Error loading HTML content: ' + error.message + '</p>';
+                        contentDiv.innerHTML = '<p class="error">Error loading HTML content: ' + error.message + '. Check: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
                         console.error('HTML load failed:', fileUrl, error);
                     });
             } else if (extension === 'css') {
@@ -79,11 +97,11 @@
                 link.rel = 'stylesheet';
                 link.href = fileUrl;
                 link.onerror = () => {
-                    contentDiv.innerHTML = '<p class="error">Failed to load CSS. Check CORS or file availability.</p>';
+                    contentDiv.innerHTML = '<p class="error">Failed to load CSS. Check CORS or file availability: <a href="' + fileUrl + '">' + fileUrl + '</a></p>';
                     console.error('CSS load failed:', fileUrl);
                 };
                 document.head.appendChild(link);
-                contentDiv.innerHTML = '<p>CSS file applied. Check document styles.</p>';
+                contentDiv.innerHTML = '<p class="info">CSS file applied. Check document styles.</p>';
             } else {
                 contentDiv.innerHTML = '<p class="error">Unsupported file type: ' + extension + '</p>';
                 console.error('Unsupported file type:', extension);
