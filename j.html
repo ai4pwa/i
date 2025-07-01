@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Render Base44 StorageItem</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
 </head>
 <body>
     <div id="content"></div>
@@ -15,7 +16,6 @@
         // Map extensions to MIME types for inference
         const extensionToMimeType = {
             '.css': 'text/css',
-            '.html': 'text/html',
             '.js': 'application/javascript',
             '.png': 'image/png',
             '.jpg': 'image/jpeg',
@@ -29,6 +29,12 @@
 
             if (!itemId) {
                 contentDiv.innerHTML = '<p>No page specified in the URL.</p>';
+                return;
+            }
+
+            // Check if itemId is an HTML file
+            if (itemId.endsWith('.html')) {
+                contentDiv.innerHTML = '<p>HTML files are not supported.</p>';
                 return;
             }
 
@@ -57,8 +63,6 @@
                 // Handle different file types
                 if (mimeType.startsWith('image/')) {
                     contentDiv.innerHTML = `<img src="${item.file_url}" alt="${item.name || 'Image'}" style="max-width: 100%;">`;
-                } else if (mimeType === 'text/html') {
-                    contentDiv.innerHTML = item.content || '<p>No content available</p>';
                 } else if (mimeType.startsWith('text/') || mimeType === 'application/javascript' || mimeType === 'text/css') {
                     contentDiv.innerHTML = `<pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">${item.content || 'No content available'}</pre>`;
                 } else if (mimeType === 'application/pdf') {
@@ -67,11 +71,9 @@
                     contentDiv.innerHTML = `<p>File type (${mimeType}) not directly renderable. <a href="${item.file_url}" download>Download ${item.name || 'file'}</a></p>`;
                 }
             } catch (error) {
-                contentDiv.innerHTML = `<p>Base44 API error: ${error.message}. Trying Supabase fallback...</p>`;
-
                 // Fallback to Supabase
                 const baseSupabaseUrl = 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/';
-                const possibleExtensions = ['', '.css', '.html', '.js', '.png', '.jpg', '.jpeg', '.pdf'];
+                const possibleExtensions = ['', '.css', '.js', '.png', '.jpg', '.jpeg', '.pdf'];
                 let lastError = null;
 
                 for (const ext of possibleExtensions) {
@@ -96,8 +98,6 @@
                             contentDiv.innerHTML = `<img src="${supabaseUrl}" alt="Image" style="max-width: 100%;">`;
                         } else if (mimeType === 'application/pdf') {
                             contentDiv.innerHTML = `<embed src="${supabaseUrl}" type="application/pdf" width="100%" height="600px" />`;
-                        } else if (mimeType === 'text/html') {
-                            contentDiv.innerHTML = content || '<p>No content available</p>';
                         } else if (mimeType.startsWith('text/') || mimeType === 'application/javascript') {
                             contentDiv.innerHTML = `<pre style="background: #f4f4f4; padding: 10px; border-radius: 5px;">${content}</pre>`;
                         } else {
