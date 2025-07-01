@@ -8,6 +8,7 @@
         body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         img { max-width: 100%; height: auto; }
         #content { width: 100%; max-width: 1200px; padding: 20px; }
+        .error { color: red; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -35,33 +36,61 @@
             const extension = getFileExtension(page);
             const fileUrl = baseUrl + page;
 
+            console.log('Attempting to load:', fileUrl); // Debugging
+
             if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
                 // Handle image files
                 const img = document.createElement('img');
                 img.src = fileUrl;
                 img.alt = 'Loaded image';
+                img.onerror = () => {
+                    contentDiv.innerHTML = '<p class="error">Failed to load image. Check CORS or file availability.</p>';
+                    console.error('Image load failed:', fileUrl);
+                };
+                img.onload = () => console.log('Image loaded successfully:', fileUrl);
                 contentDiv.appendChild(img);
             } else if (extension === 'js') {
                 // Handle JavaScript files
                 const script = document.createElement('script');
                 script.src = fileUrl;
+                script.onerror = () => {
+                    contentDiv.innerHTML = '<p class="error">Failed to load script. Check CORS or file availability.</p>';
+                    console.error('Script load failed:', fileUrl);
+                };
                 document.body.appendChild(script);
             } else if (extension === 'html') {
                 // Handle HTML files
                 fetch(fileUrl)
-                    .then(response => response.text())
+                    .then(response => {
+                        if (!response.ok) throw new Error('HTTP error ' + response.status);
+                        return response.text();
+                    })
                     .then(data => {
                         contentDiv.innerHTML = data;
+                        console.log('HTML loaded successfully:', fileUrl);
                     })
                     .catch(error => {
-                        contentDiv.innerHTML = '<p>Error loading HTML content.</p>';
-                        console.error('Error:', error);
+                        contentDiv.innerHTML = '<p class="error">Error loading HTML content: ' + error.message + '</p>';
+                        console.error('HTML load failed:', fileUrl, error);
                     });
+            } else if (extension === 'css') {
+                // Handle CSS files
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = fileUrl;
+                link.onerror = () => {
+                    contentDiv.innerHTML = '<p class="error">Failed to load CSS. Check CORS or file availability.</p>';
+                    console.error('CSS load failed:', fileUrl);
+                };
+                document.head.appendChild(link);
+                contentDiv.innerHTML = '<p>CSS file applied. Check document styles.</p>';
             } else {
-                contentDiv.innerHTML = '<p>Unsupported file type.</p>';
+                contentDiv.innerHTML = '<p class="error">Unsupported file type: ' + extension + '</p>';
+                console.error('Unsupported file type:', extension);
             }
         } else {
-            contentDiv.innerHTML = '<p>No file specified in URL.</p>';
+            contentDiv.innerHTML = '<p class="error">No file specified in URL.</p>';
+            console.error('No page parameter in URL');
         }
     </script>
 </body>
