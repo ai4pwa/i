@@ -25,6 +25,16 @@
             return filename.split('.').pop().toLowerCase();
         }
 
+        // Function to convert blob to Base64
+        function blobToBase64(blob) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+
         // Base URL for fetching files
         const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
 
@@ -32,51 +42,31 @@
         const page = getQueryParam('page');
         const contentDiv = document.getElementById('content');
 
-        // Check if the request is likely from an <img> tag
-        const isImageRequest = (window.location.href.indexOf('page=') !== -1 && 
-                               getFileExtension(page).match(/jpg|jpeg|png/)) && 
-                               !window.navigator.userAgent.includes('Mozilla');
-
         if (page) {
             const extension = getFileExtension(page);
             const fileUrl = baseUrl + page;
 
-            console.log('Attempting to load:', fileUrl);
+            console.log('Attempting to load:', fileUrl); // Debugging
 
-            if (isImageRequest && (extension === 'jpg' || extension === 'jpeg' || extension === 'png')) {
-                // Handle image requests for <img> tags by returning Base64
+            if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
+                // Handle image files with Base64 conversion
                 fetch(fileUrl)
                     .then(response => {
                         if (!response.ok) throw new Error('HTTP error ' + response.status);
                         return response.blob();
                     })
-                    .then(blob => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                            // Redirect to Base64 data URI
-                            window.location.href = reader.result;
-                        };
-                        reader.onerror = () => {
-                            document.write('<p class="error">Failed to encode image.</p>');
-                            console.error('Base64 encoding failed:', fileUrl);
-                        };
-                        reader.readAsDataURL(blob);
+                    .then(blob => blobToBase64(blob))
+                    .then(base64 => {
+                        const img = document.createElement('img');
+                        img.src = base64;
+                        img.alt = 'Loaded image';
+                        contentDiv.appendChild(img);
+                        console.log('Image loaded as Base64:', fileUrl);
                     })
                     .catch(error => {
-                        document.write('<p class="error">Error loading image: ' + error.message + '</p>');
+                        contentDiv.innerHTML = '<p class="error">Failed to load image: ' + error.message + '</p>';
                         console.error('Image load failed:', fileUrl, error);
                     });
-            } else if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Handle image files for direct browser navigation
-                const img = document.createElement('img');
-                img.src = fileUrl;
-                img.alt = 'Loaded image';
-                img.onerror = () => {
-                    contentDiv.innerHTML = '<p class="error">Failed to load image. Check CORS or file availability.</p>';
-                    console.error('Image load failed:', fileUrl);
-                };
-                img.onload = () => console.log('Image loaded successfully:', fileUrl);
-                contentDiv.appendChild(img);
             } else if (extension === 'js') {
                 // Handle JavaScript files
                 const script = document.createElement('script');
