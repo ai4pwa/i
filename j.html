@@ -3,43 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic File Loader</title>
+    <title>Dynamic Image Loader</title>
 </head>
 <body>
-    <div id="content">Loading...</div>
-
+    <img id="dynamicImage" src="" alt="Dynamic Image">
     <script>
         // Function to get query parameter from URL
-        function getQueryParam(param) {
+        function getQueryParam(name) {
             const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get(param);
+            return urlParams.get(name);
         }
 
-        // Get the file name from the 'page' query parameter
-        const fileName = getQueryParam('page');
+        // Get the page parameter from the URL
+        const page = getQueryParam('page');
 
-        // If fileName exists, construct the new URL and update the content
-        if (fileName) {
-            const newUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${fileName}`;
-            const contentDiv = document.getElementById('content');
-
-            // Check if the file is an image (based on extension)
-            const extension = fileName.split('.').pop().toLowerCase();
-            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
-                // If it's an image, display it
-                const img = document.createElement('img');
-                img.src = newUrl;
-                img.alt = 'Dynamic Image';
-                img.style.maxWidth = '100%';
-                contentDiv.innerHTML = '';
-                contentDiv.appendChild(img);
-            } else {
-                // For non-image files, display a link
-                contentDiv.innerHTML = `<a href="${newUrl}" target="_blank">View File: ${fileName}</a>`;
-            }
+        // Check if page parameter exists and is a valid image filename
+        if (page && /\.(jpg|jpeg|png|gif)$/i.test(page)) {
+            // Construct the new image URL
+            const newSrc = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${page}`;
+            // Update the img tag's src attribute
+            document.getElementById('dynamicImage').src = newSrc;
         } else {
-            // If no fileName is provided, show an error message
-            document.getElementById('content').innerHTML = 'No file specified in the URL.';
+            // Fallback if no valid page parameter is provided
+            document.getElementById('dynamicImage').src = 'https://via.placeholder.com/150';
+            document.getElementById('dynamicImage').alt = 'No valid image specified';
         }
     </script>
 </body>
