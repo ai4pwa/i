@@ -4,111 +4,42 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dynamic File Loader</title>
-    <style>
-        body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        img { max-width: 100%; height: auto; }
-        #content { width: 100%; max-width: 1200px; padding: 20px; }
-        .error { color: red; font-weight: bold; }
-    </style>
 </head>
 <body>
-    <div id="content"></div>
+    <div id="content">Loading...</div>
+
     <script>
-        // Function to get query parameter by name
-        function getQueryParam(name) {
+        // Function to get query parameter from URL
+        function getQueryParam(param) {
             const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get(name);
+            return urlParams.get(param);
         }
 
-        // Function to get file extension from filename
-        function getFileExtension(filename) {
-            return filename.split('.').pop().toLowerCase();
-        }
+        // Get the file name from the 'page' query parameter
+        const fileName = getQueryParam('page');
 
-        // Function to convert blob to Base64
-        function blobToBase64(blob) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
+        // If fileName exists, construct the new URL and update the content
+        if (fileName) {
+            const newUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${fileName}`;
+            const contentDiv = document.getElementById('content');
 
-        // Base URL for fetching files
-        const baseUrl = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
-
-        // Get the page parameter from URL
-        const page = getQueryParam('page');
-        const contentDiv = document.getElementById('content');
-
-        if (page) {
-            const extension = getFileExtension(page);
-            const fileUrl = baseUrl + page;
-
-            console.log('Attempting to load:', fileUrl); // Debugging
-
-            if (extension === 'jpg' || extension === 'jpeg' || extension === 'png') {
-                // Handle image files with Base64 conversion
-                fetch(fileUrl)
-                    .then(response => {
-                        if (!response.ok) throw new Error('HTTP error ' + response.status);
-                        return response.blob();
-                    })
-                    .then(blob => blobToBase64(blob))
-                    .then(base64 => {
-                        const img = document.createElement('img');
-                        img.src = base64;
-                        img.alt = 'Loaded image';
-                        contentDiv.appendChild(img);
-                        console.log('Image loaded as Base64:', fileUrl);
-                    })
-                    .catch(error => {
-                        contentDiv.innerHTML = '<p class="error">Failed to load image: ' + error.message + '</p>';
-                        console.error('Image load failed:', fileUrl, error);
-                    });
-            } else if (extension === 'js') {
-                // Handle JavaScript files
-                const script = document.createElement('script');
-                script.src = fileUrl;
-                script.onerror = () => {
-                    contentDiv.innerHTML = '<p class="error">Failed to load script. Check CORS or file availability.</p>';
-                    console.error('Script load failed:', fileUrl);
-                };
-                document.body.appendChild(script);
-            } else if (extension === 'html') {
-                // Handle HTML files
-                fetch(fileUrl)
-                    .then(response => {
-                        if (!response.ok) throw new Error('HTTP error ' + response.status);
-                        return response.text();
-                    })
-                    .then(data => {
-                        contentDiv.innerHTML = data;
-                        console.log('HTML loaded successfully:', fileUrl);
-                    })
-                    .catch(error => {
-                        contentDiv.innerHTML = '<p class="error">Error loading HTML content: ' + error.message + '</p>';
-                        console.error('HTML load failed:', fileUrl, error);
-                    });
-            } else if (extension === 'css') {
-                // Handle CSS files
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = fileUrl;
-                link.onerror = () => {
-                    contentDiv.innerHTML = '<p class="error">Failed to load CSS. Check CORS or file availability.</p>';
-                    console.error('CSS load failed:', fileUrl);
-                };
-                document.head.appendChild(link);
-                contentDiv.innerHTML = '<p>CSS file applied. Check document styles.</p>';
+            // Check if the file is an image (based on extension)
+            const extension = fileName.split('.').pop().toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
+                // If it's an image, display it
+                const img = document.createElement('img');
+                img.src = newUrl;
+                img.alt = 'Dynamic Image';
+                img.style.maxWidth = '100%';
+                contentDiv.innerHTML = '';
+                contentDiv.appendChild(img);
             } else {
-                contentDiv.innerHTML = '<p class="error">Unsupported file type: ' + extension + '</p>';
-                console.error('Unsupported file type:', extension);
+                // For non-image files, display a link
+                contentDiv.innerHTML = `<a href="${newUrl}" target="_blank">View File: ${fileName}</a>`;
             }
         } else {
-            contentDiv.innerHTML = '<p class="error">No file specified in URL.</p>';
-            console.error('No page parameter in URL');
+            // If no fileName is provided, show an error message
+            document.getElementById('content').innerHTML = 'No file specified in the URL.';
         }
     </script>
 </body>
