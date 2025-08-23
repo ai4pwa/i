@@ -1,5 +1,11 @@
 (function () {
-  // Read ?page=... parameter from script src
+  // Step 1: Hide body immediately with a <style> tag
+  const hideStyle = document.createElement("style");
+  hideStyle.setAttribute("id", "css-proxy-hide");
+  hideStyle.textContent = "body{visibility:hidden !important;}";
+  document.head.appendChild(hideStyle);
+
+  // Read ?page=... from script src
   function getScriptParam(name) {
     const currentScript = document.currentScript;
     if (!currentScript) return null;
@@ -11,30 +17,29 @@
   const cssFile = getScriptParam("page");
   if (!cssFile) {
     console.error("❌ No CSS file specified in j.js src (?page=...)");
+    document.head.removeChild(hideStyle);
     return;
   }
 
   const cssUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${cssFile}`;
 
-  // Hide page initially
-  document.addEventListener("DOMContentLoaded", async () => {
-    document.body.style.visibility = "hidden";
-
-    try {
-      const res = await fetch(cssUrl);
+  // Step 2: Fetch CSS and apply
+  fetch(cssUrl)
+    .then(res => {
       if (!res.ok) throw new Error("HTTP " + res.status);
-
-      const cssText = await res.text();
+      return res.text();
+    })
+    .then(cssText => {
       const style = document.createElement("style");
       style.textContent = cssText;
       document.head.appendChild(style);
-
-      // ✅ Reveal page when CSS ready
-      document.body.style.visibility = "visible";
-    } catch (err) {
+    })
+    .catch(err => {
       console.error("❌ Error loading CSS:", err);
-      // Fallback: still reveal page
-      document.body.style.visibility = "visible";
-    }
-  });
+    })
+    .finally(() => {
+      // Step 3: Reveal body by removing hide style
+      const s = document.getElementById("css-proxy-hide");
+      if (s) s.remove();
+    });
 })();
