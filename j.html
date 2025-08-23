@@ -1,33 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic Image Loader</title>
+  <meta charset="UTF-8">
+  <title>CSS Proxy</title>
+  <script>
+    async function injectCSS() {
+      const params = new URLSearchParams(window.location.search);
+      const cssFile = params.get("page");
+      const res = await fetch(`https://base44.app/api/apps/686424824d7b61721eac3e29/files/${cssFile}`);
+      const cssText = await res.text();
+      const style = document.createElement("style");
+      style.textContent = cssText;
+
+      if (window.parent && window.parent.document) {
+        window.parent.document.head.appendChild(style);
+        // ✅ Tell parent we're done
+        window.parent.postMessage("css-ready", "*");
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", injectCSS);
+  </script>
 </head>
-<body>
-    <img id="dynamicImage" src="" alt="Dynamic Image">
-    <script>
-        // Function to get query parameter from URL
-        function getQueryParam(name) {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get(name);
-        }
-
-        // Get the page parameter from the URL
-        const page = getQueryParam('page');
-
-        // Check if page parameter exists and is a valid image filename
-        if (page && /\.(jpg|jpeg|png|gif)$/i.test(page)) {
-            // Construct the new image URL
-            const newSrc = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${page}`;
-            // Update the img tag's src attribute
-            document.getElementById('dynamicImage').src = newSrc;
-        } else {
-            // Fallback if no valid page parameter is provided
-            document.getElementById('dynamicImage').src = 'https://via.placeholder.com/150';
-            document.getElementById('dynamicImage').alt = 'No valid image specified';
-        }
-    </script>
-</body>
+<body></body>
 </html>
+
