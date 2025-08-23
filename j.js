@@ -1,38 +1,32 @@
 (function () {
-  // Inject loader and hide rule immediately (before paint)
-  document.write('<div id="css-loader">Loading page...</div>');
-  document.write('<style id="css-proxy-hide">body > *:not(#css-loader){display:none !important;}</style>');
+  // Loader + hide
+  const loader = document.createElement("div");
+  loader.id = "css-loader";
+  loader.textContent = "Loading page...";
+  document.body.appendChild(loader);
 
-  // Get ?page=... parameter from script src
-  function getScriptParam(name) {
-    const currentScript = document.currentScript;
-    const src = currentScript.src;
-    const url = new URL(src);
-    return url.searchParams.get(name);
-  }
+  const hide = document.createElement("style");
+  hide.id = "css-proxy-hide";
+  hide.textContent = "body > *:not(#css-loader){display:none !important;}";
+  document.head.appendChild(hide);
 
-  const cssFile = getScriptParam("page");
+  // Get ?page=... param
+  const currentScript = document.currentScript;
+  const cssFile = currentScript ? new URL(currentScript.src).searchParams.get("page") : null;
+  if (!cssFile) return cleanup();
+
   const cssUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${cssFile}`;
 
-  // Fetch and inject CSS
-  fetch(cssUrl)
-    .then(res => {
-      return res.text();
-    })
-    .then(cssText => {
-      const style = document.createElement("style");
-      style.textContent = cssText;
-      document.head.appendChild(style);
-    })
-    .finally(() => {
-      cleanup();
-    });
+  // Load CSS with <link>
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = cssUrl;
+  link.onload = cleanup;
+  link.onerror = () => { console.error("CSS load failed"); cleanup(); };
+  document.head.appendChild(link);
 
-  // Remove loader + reveal content
   function cleanup() {
-    const h = document.getElementById("css-proxy-hide");
-    if (h) h.remove();
-    const l = document.getElementById("css-loader");
-    if (l) l.remove();
+    hide?.remove();
+    loader?.remove();
   }
 })();
