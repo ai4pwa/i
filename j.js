@@ -1,19 +1,9 @@
 (function () {
-  // Step 1: Add loader immediately
-  const loader = document.createElement("div");
-  loader.id = "css-loader";
-  loader.textContent = "Loading page...";
-  Object.assign(loader.style, {
-  });
-  document.body.appendChild(loader);
+  // Inject loader and hide rule immediately (before paint)
+  document.write('<div id="css-loader">Loading page...</div>');
+  document.write('<style id="css-proxy-hide">body > *:not(#css-loader){display:none !important;}</style>');
 
-  // Step 2: Hide body content (except loader)
-  const hideStyle = document.createElement("style");
-  hideStyle.setAttribute("id", "css-proxy-hide");
-  hideStyle.textContent = "body > *:not(#css-loader){display:none !important;}";
-  document.head.appendChild(hideStyle);
-
-  // Helper: read ?page=... from script src
+  // Get ?page=... parameter from script src
   function getScriptParam(name) {
     const currentScript = document.currentScript;
     if (!currentScript) return null;
@@ -31,7 +21,7 @@
 
   const cssUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${cssFile}`;
 
-  // Step 3: Fetch CSS
+  // Fetch and inject CSS
   fetch(cssUrl)
     .then(res => {
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -49,10 +39,11 @@
       cleanup();
     });
 
-  // Cleanup: remove loader + reveal content
+  // Remove loader + reveal content
   function cleanup() {
-    const s = document.getElementById("css-proxy-hide");
-    if (s) s.remove();
-    if (loader && loader.parentNode) loader.remove();
+    const h = document.getElementById("css-proxy-hide");
+    if (h) h.remove();
+    const l = document.getElementById("css-loader");
+    if (l) l.remove();
   }
 })();
