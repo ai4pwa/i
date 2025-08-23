@@ -1,30 +1,49 @@
 (function () {
-  // Inject loader and hide style synchronously (like document.write but safer)
-  document.head.insertAdjacentHTML("beforeend",
-    '<style id="css-proxy-hide">body > *:not(#css-loader){display:none !important;}</style>'
-  );
-  document.documentElement.insertAdjacentHTML("beforeend",
-    '<body><div id="css-loader">Loading page...</div></body>'
-  );
+  // Inject loader and hide rule immediately (before paint)
+  document.write('<div id="css-loader">Loading page...</div>');
+  document.write('<style id="css-proxy-hide">body > *:not(#css-loader){display:none !important;}</style>');
 
-  // Get ?page=... param from this script src
-  const currentScript = document.currentScript;
-  const cssFile = currentScript ? new URL(currentScript.src).searchParams.get("page") : null;
-  if (!cssFile) return cleanup();
+  // Get ?page=... parameter from script src
+  function getScriptParam(name) {
+    const currentScript = document.currentScript;
+    if (!currentScript) return null;
+    const src = currentScript.src;
+    const url = new URL(src);
+    return url.searchParams.get(name);
+  }
+
+  const cssFile = getScriptParam("page");
+  if (!cssFile) {
+    console.error("No CSS file specified in j.js src (?page=...)");
+    cleanup();
+    return;
+  }
 
   const cssUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${cssFile}`;
 
-  // Load CSS using <link>
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = cssUrl;
-  link.onload = cleanup;
-  link.onerror = () => { console.error("❌ CSS load failed"); cleanup(); };
-  document.head.appendChild(link);
+  // Fetch and inject CSS
+  fetch(cssUrl)
+    .then(res => {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.text();
+    })
+    .then(cssText => {
+      const style = document.createElement("style");
+      style.textContent = cssText;
+      document.head.appendChild(style);
+    })
+    .catch(err => {
+      console.error("Error loading CSS:", err);
+    })
+    .finally(() => {
+      cleanup();
+    });
 
-  // Remove loader and unhide content
+  // Remove loader + reveal content
   function cleanup() {
-    document.getElementById("css-proxy-hide")?.remove();
-    document.getElementById("css-loader")?.remove();
+    const h = document.getElementById("css-proxy-hide");
+    if (h) h.remove();
+    const l = document.getElementById("css-loader");
+    if (l) l.remove();
   }
 })();
