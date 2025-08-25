@@ -4,9 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
+
+<style>
+  /* Keep page invisible until we’re ready */
+  body {
+    visibility: hidden;
+  }
+</style>
+
 </head>
 
 <body>
+
   <div id="content">Loading page...</div>
 
 <script>
@@ -25,7 +34,7 @@
 
       const cssPromises = [];
 
-      // Collect CSS <link> or <script> (your j.js css loader)
+      // Handle <link rel="stylesheet"> and CSS-loader <script>
       container.querySelectorAll("link[rel='stylesheet'], script[src*='.css']").forEach(node => {
         if (node.tagName === "LINK") {
           const link = document.createElement("link");
@@ -33,11 +42,10 @@
           link.href = node.href;
           cssPromises.push(new Promise(resolve => {
             link.onload = resolve;
-            link.onerror = resolve; // don't block on errors
+            link.onerror = resolve;
           }));
           document.head.appendChild(link);
         } else if (node.tagName === "SCRIPT") {
-          // handles your j.js css loader
           const script = document.createElement("script");
           script.src = node.src;
           cssPromises.push(new Promise(resolve => {
@@ -46,10 +54,10 @@
           }));
           document.head.appendChild(script);
         }
-        node.remove(); // prevent duplicate insertion later
+        node.remove();
       });
 
-      // After CSS finished loading → insert content
+      // Wait for all CSS before showing body
       Promise.all(cssPromises).then(() => {
         document.body.innerHTML = "";
         Array.from(container.childNodes).forEach(node => {
@@ -65,12 +73,17 @@
             document.body.appendChild(node);
           }
         });
+
+        // Finally reveal the styled body
+        document.body.style.visibility = "visible";
       });
     })
     .catch(err => {
-      document.getElementById('content').innerText = `Error loading content: ${err}`;
+      document.body.style.visibility = "visible";
+      document.body.innerText = `Error loading content: ${err}`;
     });
 </script>
+
 
 </body>
 </html>
