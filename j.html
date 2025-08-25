@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
   <style>
-    /* Keep content hidden until styles load */
+    /* Keep body hidden until CSS and head scripts finish loading */
     body {
       visibility: hidden;
       margin: 0;
@@ -26,51 +26,70 @@
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const htmlCode = await response.text();
 
-        // Parse the remote HTML
         const parser = new DOMParser();
         const doc = parser.parseFromString(htmlCode, 'text/html');
 
         // --------------------
-        // 1. Inject <head> content (CSS, meta, title)
+        // 1. Inject <head> content
         // --------------------
-        document.head.querySelectorAll(':not(meta):not(title):not(base):not(style)').forEach(el => el.remove());
+        const cssPromises = [];
+        const scriptPromises = [];
 
-        const cssLinks = [];
-        doc.head.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
-          const newLink = document.createElement('link');
-          newLink.rel = 'stylesheet';
-          newLink.href = link.href;
-          cssLinks.push(new Promise(resolve => {
-            newLink.onload = resolve;
-            newLink.onerror = resolve; // resolve anyway to avoid hanging
-          }));
-          document.head.appendChild(newLink);
+        // Remove old dynamically injected head elements
+        document.head.querySelectorAll('.dynamic-head').forEach(el => el.remove());
+
+        // Inject meta, title, link, and style tags
+        doc.head.querySelectorAll('meta, title, link[rel="stylesheet"], style').forEach(tag => {
+          const clone = tag.cloneNode(true);
+          clone.classList.add('dynamic-head');
+          if (clone.tagName === 'LINK' && clone.rel === 'stylesheet') {
+            cssPromises.push(new Promise(resolve => {
+              clone.onload = resolve;
+              clone.onerror = resolve;
+            }));
+          }
+          document.head.appendChild(clone);
         });
 
-        doc.head.querySelectorAll('meta, title, style:not([rel="stylesheet"])').forEach(tag => {
-          document.head.appendChild(tag.cloneNode(true));
+        // Inject scripts in <head>
+        doc.head.querySelectorAll('script').forEach(tag => {
+          const newScript = document.createElement('script');
+          newScript.classList.add('dynamic-head');
+          if (tag.src) {
+            newScript.src = tag.src;
+            scriptPromises.push(new Promise(resolve => {
+              newScript.onload = resolve;
+              newScript.onerror = resolve;
+            }));
+          } else {
+            newScript.textContent = tag.textContent;
+          }
+          document.head.appendChild(newScript);
         });
 
         // --------------------
-        // 2. Inject <body> content after CSS finishes loading
+        // 2. Wait for CSS and head scripts to load
         // --------------------
-        Promise.all(cssLinks).then(() => {
-          document.body.innerHTML = doc.body.innerHTML;
+        await Promise.all([...cssPromises, ...scriptPromises]);
 
-          // Re-run all script tags
-          doc.querySelectorAll('script').forEach(oldScript => {
-            const newScript = document.createElement('script');
-            if (oldScript.src) {
-              newScript.src = oldScript.src;
-            } else {
-              newScript.textContent = oldScript.textContent;
-            }
-            document.body.appendChild(newScript);
-          });
+        // --------------------
+        // 3. Inject body content
+        // --------------------
+        document.body.innerHTML = doc.body.innerHTML;
 
-          // Show body now that CSS is ready
-          document.body.style.visibility = 'visible';
+        // Execute <script> tags in the body
+        doc.body.querySelectorAll('script').forEach(tag => {
+          const newScript = document.createElement('script');
+          if (tag.src) {
+            newScript.src = tag.src;
+          } else {
+            newScript.textContent = tag.textContent;
+          }
+          document.body.appendChild(newScript);
         });
+
+        // Finally, reveal body
+        document.body.style.visibility = 'visible';
 
       } catch (err) {
         document.body.style.visibility = 'visible';
