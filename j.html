@@ -1,75 +1,38 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HTML Loader</title>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const htmlFile = params.get('page');
 
-  <script>
-    // Prepare variables and fetch request early
-    const params = new URLSearchParams(window.location.search);
-    const htmlFile = params.get('page');
-    const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
+  const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
 
-    // Use global promise so body script can act when ready
-    window.pagePromise = fetch(targetUrl)
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-        return res.text();
-      })
-      .then(htmlCode => {
-        const parser = new DOMParser();
-        return parser.parseFromString(htmlCode, 'text/html');
-      })
-      .catch(err => {
-        // Store the error globally for the body script to use
-        window.pageError = err;
-        return null;
-      });
-
-
-      // Clear current head except base tags
-      document.head.querySelectorAll(':not(meta):not(title):not(base):not(style)').forEach(el => el.remove());
-
-      // Inject head tags from remote page
-      doc.head.querySelectorAll('link, meta, style, title').forEach(tag => {
-        document.head.appendChild(tag.cloneNode(true));
-      });
-
-  </script>
-</head>
-
-<body>
-  <div id="content">Loading...</div>
-
-  <script>
-    // Once body is ready, handle DOM manipulations
-    window.pagePromise.then(doc => {
-      const contentDiv = document.getElementById('content');
-
-      if (!doc) {
-        if (contentDiv) {
-          contentDiv.innerText = `Error loading content: ${window.pageError}`;
-        } else {
-          alert(`Error loading content: ${window.pageError}`);
-        }
-        return;
+  fetch(targetUrl)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      return response.text();
+    })
+    .then(htmlCode => {
+      // Create a container and parse the HTML
+      const container = document.createElement("div");
+      container.innerHTML = htmlCode;
 
-      // Replace body content
-      document.body.innerHTML = doc.body.innerHTML;
-
-      // Re-run script tags
-      doc.querySelectorAll('script').forEach(oldScript => {
-        const newScript = document.createElement('script');
-        if (oldScript.src) {
-          newScript.src = oldScript.src;
+      // Replace body content with parsed nodes
+      document.body.innerHTML = "";
+      Array.from(container.childNodes).forEach(node => {
+        if (node.tagName === "SCRIPT") {
+          const script = document.createElement("script");
+          if (node.src) {
+            script.src = node.src; // external script
+          } else {
+            script.textContent = node.textContent; // inline script
+          }
+          document.body.appendChild(script);
         } else {
-          newScript.textContent = oldScript.textContent;
+          document.body.appendChild(node);
         }
-        document.body.appendChild(newScript);
       });
+    })
+    .catch(err => {
+      document.getElementById('content').innerText = `Error loading content: ${err}`;
     });
-  </script>
-</body>
-</html>
+</script>
