@@ -4,86 +4,82 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
-
-<style>
-  /* Keep page invisible until we’re ready */
-  body {
-    visibility: hidden;
-  }
-</style>
-
+  <style id="css-proxy-hide">
+    /* Hide everything except loader until CSS is ready */
+    body > *:not(#css-loader){display:none !important;}
+  </style>
 </head>
-
 <body>
+  <!-- Temporary loader -->
+  <div id="css-loader">Loading page...</div>
 
-  <div id="content">Loading page...</div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const htmlFile = params.get('page');
+    const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
 
-<script>
-  const params = new URLSearchParams(window.location.search);
-  const htmlFile = params.get('page');
-  const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
+    fetch(targetUrl)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        return res.text();
+      })
+      .then(htmlCode => {
+        const container = document.createElement("div");
+        container.innerHTML = htmlCode;
 
-  fetch(targetUrl)
-    .then(response => {
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.text();
-    })
-    .then(htmlCode => {
-      const container = document.createElement("div");
-      container.innerHTML = htmlCode;
+        const cssPromises = [];
 
-      const cssPromises = [];
-
-      // Handle <link rel="stylesheet"> and CSS-loader <script>
-      container.querySelectorAll("link[rel='stylesheet'], script[src*='.css']").forEach(node => {
-        if (node.tagName === "LINK") {
-          const link = document.createElement("link");
-          link.rel = "stylesheet";
-          link.href = node.href;
-          cssPromises.push(new Promise(resolve => {
-            link.onload = resolve;
-            link.onerror = resolve;
-          }));
-          document.head.appendChild(link);
-        } else if (node.tagName === "SCRIPT") {
-          const script = document.createElement("script");
-          script.src = node.src;
-          cssPromises.push(new Promise(resolve => {
-            script.onload = resolve;
-            script.onerror = resolve;
-          }));
-          document.head.appendChild(script);
-        }
-        node.remove();
-      });
-
-      // Wait for all CSS before showing body
-      Promise.all(cssPromises).then(() => {
-        document.body.innerHTML = "";
-        Array.from(container.childNodes).forEach(node => {
-          if (node.tagName === "SCRIPT") {
+        // find CSS loaders: <link> or <script src="...css">
+        container.querySelectorAll("link[rel='stylesheet'], script[src*='.css']").forEach(node => {
+          if (node.tagName === "LINK") {
+            const link = document.createElement("link");
+            link.rel = "stylesheet";
+            link.href = node.href;
+            cssPromises.push(new Promise(resolve => {
+              link.onload = resolve;
+              link.onerror = resolve;
+            }));
+            document.head.appendChild(link);
+          } else if (node.tagName === "SCRIPT") {
             const script = document.createElement("script");
-            if (node.src) {
-              script.src = node.src;
-            } else {
-              script.textContent = node.textContent;
-            }
-            document.body.appendChild(script);
-          } else {
-            document.body.appendChild(node);
+            script.src = node.src;
+            cssPromises.push(new Promise(resolve => {
+              script.onload = resolve;
+              script.onerror = resolve;
+            }));
+            document.head.appendChild(script);
           }
+          node.remove();
         });
 
-        // Finally reveal the styled body
-        document.body.style.visibility = "visible";
+        // Wait for CSS to load before revealing
+        Promise.all(cssPromises).then(() => {
+          document.body.innerHTML = "";
+          Array.from(container.childNodes).forEach(node => {
+            if (node.tagName === "SCRIPT") {
+              const script = document.createElement("script");
+              if (node.src) {
+                script.src = node.src;
+              } else {
+                script.textContent = node.textContent;
+              }
+              document.body.appendChild(script);
+            } else {
+              document.body.appendChild(node);
+            }
+          });
+
+          // Cleanup loader + hide rule → reveal styled content
+          const h = document.getElementById("css-proxy-hide");
+          if (h) h.remove();
+          const l = document.getElementById("css-loader");
+          if (l) l.remove();
+        });
+      })
+      .catch(err => {
+        const l = document.getElementById("css-loader");
+        if (l) l.innerText = `Error: ${err}`;
       });
-    })
-    .catch(err => {
-      document.body.style.visibility = "visible";
-      document.body.innerText = `Error loading content: ${err}`;
-    });
-</script>
-
-
+  </script>
 </body>
 </html>
