@@ -3,97 +3,73 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Remote Page Loader</title>
-
-  <!-- Hide content until CSS loads -->
-  <style>
-    body {
-      visibility: hidden;
-      margin: 0;
-    }
-  </style>
+  <title>HTML Loader</title>
 
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const params = new URLSearchParams(window.location.search);
-      const htmlFile = params.get('page');
-      if (!htmlFile) {
-        document.body.innerHTML = "<h2>No page specified!</h2>";
-        document.body.style.visibility = 'visible';
-        return;
-      }
-      const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
-      loadPage(targetUrl);
-    });
+    // Prepare variables and fetch request early
+    const params = new URLSearchParams(window.location.search);
+    const htmlFile = params.get('page');
+    const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
 
-    async function loadPage(targetUrl) {
-      try {
-        const response = await fetch(targetUrl);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const htmlCode = await response.text();
-
+    // Use global promise so body script can act when ready
+    window.pagePromise = fetch(targetUrl)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        return res.text();
+      })
+      .then(htmlCode => {
         const parser = new DOMParser();
-        const doc = parser.parseFromString(htmlCode, 'text/html');
+        return parser.parseFromString(htmlCode, 'text/html');
+      })
+      .catch(err => {
+        // Store the error globally for the body script to use
+        window.pageError = err;
+        return null;
+      });
 
-        const cssPromises = [];
-        const scriptPromises = [];
 
-        // Inject <head> content (meta, title, css, inline styles)
-        doc.head.querySelectorAll('meta, title, link[rel="stylesheet"], style').forEach(tag => {
-          const clone = tag.cloneNode(true);
-          if (clone.tagName === 'LINK' && clone.rel === 'stylesheet') {
-            cssPromises.push(new Promise(resolve => {
-              clone.onload = resolve;
-              clone.onerror = resolve;
-            }));
-          }
-          document.head.appendChild(clone);
-        });
+      // Clear current head except base tags
+      document.head.querySelectorAll(':not(meta):not(title):not(base):not(style)').forEach(el => el.remove());
 
-        // Inject <head> scripts
-        doc.head.querySelectorAll('script').forEach(tag => {
-          const newScript = document.createElement('script');
-          if (tag.src) {
-            newScript.src = tag.src;
-            scriptPromises.push(new Promise(resolve => {
-              newScript.onload = resolve;
-              newScript.onerror = resolve;
-            }));
-          } else {
-            newScript.textContent = tag.textContent;
-          }
-          document.head.appendChild(newScript);
-        });
+      // Inject head tags from remote page
+      doc.head.querySelectorAll('link, meta, style, title').forEach(tag => {
+        document.head.appendChild(tag.cloneNode(true));
+      });
 
-        // Wait until head CSS/JS is ready
-        await Promise.all([...cssPromises, ...scriptPromises]);
-
-        // Inject <body> content
-        document.body.innerHTML = doc.body.innerHTML;
-
-        // Inject and execute <body> scripts
-        doc.body.querySelectorAll('script').forEach(tag => {
-          const newScript = document.createElement('script');
-          if (tag.src) {
-            newScript.src = tag.src;
-          } else {
-            newScript.textContent = tag.textContent;
-          }
-          document.body.appendChild(newScript);
-        });
-
-        // Finally show the body
-        document.body.style.visibility = 'visible';
-      } catch (err) {
-        document.body.style.visibility = 'visible';
-        document.body.innerHTML = `<h2>Error loading content:</h2><pre>${err}</pre>`;
-      }
-    }
   </script>
 </head>
 
 <body>
-  <!-- Placeholder shown if no content loads -->
-  <h2 style="text-align:center; padding:2em;">Loading remote page...</h2>
+  <div id="content">Loading...</div>
+
+  <script>
+    // Once body is ready, handle DOM manipulations
+    window.pagePromise.then(doc => {
+      const contentDiv = document.getElementById('content');
+
+      if (!doc) {
+        if (contentDiv) {
+          contentDiv.innerText = `Error loading content: ${window.pageError}`;
+        } else {
+          alert(`Error loading content: ${window.pageError}`);
+        }
+        return;
+      }
+
+      // Replace body content
+      document.body.innerHTML = doc.body.innerHTML;
+
+      // Re-run script tags
+      doc.querySelectorAll('script').forEach(oldScript => {
+        const newScript = document.createElement('script');
+        if (oldScript.src) {
+          newScript.src = oldScript.src;
+        } else {
+          newScript.textContent = oldScript.textContent;
+        }
+        document.body.appendChild(newScript);
+      });
+    });
+  </script>
 </body>
 </html>
