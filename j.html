@@ -1,38 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HTML Loader</title>
+</head>
+
+<body>
+  <div id="content">Loading page...</div>
+
 <script>
   const params = new URLSearchParams(window.location.search);
   const htmlFile = params.get('page');
-
   const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
 
   fetch(targetUrl)
     .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       return response.text();
     })
     .then(htmlCode => {
-      // Create a container and parse the HTML
       const container = document.createElement("div");
       container.innerHTML = htmlCode;
 
-      // Replace body content with parsed nodes
-      document.body.innerHTML = "";
-      Array.from(container.childNodes).forEach(node => {
-        if (node.tagName === "SCRIPT") {
+      const cssPromises = [];
+
+      // Collect CSS <link> or <script> (your j.js css loader)
+      container.querySelectorAll("link[rel='stylesheet'], script[src*='.css']").forEach(node => {
+        if (node.tagName === "LINK") {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = node.href;
+          cssPromises.push(new Promise(resolve => {
+            link.onload = resolve;
+            link.onerror = resolve; // don't block on errors
+          }));
+          document.head.appendChild(link);
+        } else if (node.tagName === "SCRIPT") {
+          // handles your j.js css loader
           const script = document.createElement("script");
-          if (node.src) {
-            script.src = node.src; // external script
-          } else {
-            script.textContent = node.textContent; // inline script
-          }
-          document.body.appendChild(script);
-        } else {
-          document.body.appendChild(node);
+          script.src = node.src;
+          cssPromises.push(new Promise(resolve => {
+            script.onload = resolve;
+            script.onerror = resolve;
+          }));
+          document.head.appendChild(script);
         }
+        node.remove(); // prevent duplicate insertion later
+      });
+
+      // After CSS finished loading → insert content
+      Promise.all(cssPromises).then(() => {
+        document.body.innerHTML = "";
+        Array.from(container.childNodes).forEach(node => {
+          if (node.tagName === "SCRIPT") {
+            const script = document.createElement("script");
+            if (node.src) {
+              script.src = node.src;
+            } else {
+              script.textContent = node.textContent;
+            }
+            document.body.appendChild(script);
+          } else {
+            document.body.appendChild(node);
+          }
+        });
       });
     })
     .catch(err => {
       document.getElementById('content').innerText = `Error loading content: ${err}`;
     });
 </script>
+
+</body>
+</html>
