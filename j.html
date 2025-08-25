@@ -3,32 +3,82 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HTML Loader (Iframe)</title>
+  <title>HTML Loader</title>
   <style>
+    /* Keep content hidden until styles load */
     body {
+      visibility: hidden;
       margin: 0;
-      padding: 0;
-    }
-    iframe {
-      width: 100%;
-      height: 100vh;
-      border: none;
     }
   </style>
 </head>
 <body>
-  <iframe id="contentFrame" src="" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+  <div id="content">Loading...</div>
 
   <script>
     const params = new URLSearchParams(window.location.search);
     const htmlFile = params.get('page');
+    const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
 
-    if (htmlFile) {
-      const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
-      document.getElementById('contentFrame').src = targetUrl;
-    } else {
-      document.body.innerHTML = "<p style='text-align:center;margin-top:2rem;'>No page specified.</p>";
+    async function loadPage() {
+      try {
+        const response = await fetch(targetUrl);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const htmlCode = await response.text();
+
+        // Parse the remote HTML
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlCode, 'text/html');
+
+        // --------------------
+        // 1. Inject <head> content (CSS, meta, title)
+        // --------------------
+        document.head.querySelectorAll(':not(meta):not(title):not(base):not(style)').forEach(el => el.remove());
+
+        const cssLinks = [];
+        doc.head.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+          const newLink = document.createElement('link');
+          newLink.rel = 'stylesheet';
+          newLink.href = link.href;
+          cssLinks.push(new Promise(resolve => {
+            newLink.onload = resolve;
+            newLink.onerror = resolve; // resolve anyway to avoid hanging
+          }));
+          document.head.appendChild(newLink);
+        });
+
+        doc.head.querySelectorAll('meta, title, style:not([rel="stylesheet"])').forEach(tag => {
+          document.head.appendChild(tag.cloneNode(true));
+        });
+
+        // --------------------
+        // 2. Inject <body> content after CSS finishes loading
+        // --------------------
+        Promise.all(cssLinks).then(() => {
+          document.body.innerHTML = doc.body.innerHTML;
+
+          // Re-run all script tags
+          doc.querySelectorAll('script').forEach(oldScript => {
+            const newScript = document.createElement('script');
+            if (oldScript.src) {
+              newScript.src = oldScript.src;
+            } else {
+              newScript.textContent = oldScript.textContent;
+            }
+            document.body.appendChild(newScript);
+          });
+
+          // Show body now that CSS is ready
+          document.body.style.visibility = 'visible';
+        });
+
+      } catch (err) {
+        document.body.style.visibility = 'visible';
+        document.getElementById('content').innerText = `Error loading content: ${err}`;
+      }
     }
+
+    loadPage();
   </script>
 </body>
 </html>
