@@ -2,82 +2,158 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HTML Loader</title>
-  <style>
-    /* Page hidden by default */
-    body { display: none; }
-    #loader { display: block; }
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0" />
+  <title>HTML Loader (No FOUC)</title>
+
+  <!-- Simple overlay so users don't see unstyled content -->
+  <style id="loader-style">
+    html, body { height: 100%; margin: 0; }
+    body.loading > *:not(#loader) { display: none !important; }
+    #loader {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font: 16px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
   </style>
 </head>
-<body>
-  <div id="loader">Loading page...</div>
+<body class="loading">
+  <div id="loader">Loading page…</div>
 
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const htmlFile = params.get('page');
-    const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
+    (async () => {
+      const params = new URLSearchParams(location.search);
+      const htmlFile = params.get('page');
+      if (!htmlFile) {
+        document.getElementById('loader').textContent = 'Missing ?page=...';
+        return;
+      }
 
-    fetch(targetUrl)
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-        return res.text();
-      })
-      .then(htmlCode => {
-        const container = document.createElement("div");
-        container.innerHTML = htmlCode;
+      const BASE44 = 'https://base44.app/api/apps/686424824d7b61721eac3e29/files/';
+      const targetUrl = BASE44 + htmlFile;
 
-        const cssPromises = [];
+      // Helper: wait N ms
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-        // Find CSS sources
-        container.querySelectorAll("link[rel='stylesheet'], script[src*='.css']").forEach(node => {
-          if (node.tagName === "LINK") {
-            const link = document.createElement("link");
-            link.rel = "stylesheet";
-            link.href = node.href;
-            cssPromises.push(new Promise(resolve => {
-              link.onload = resolve;
-              link.onerror = resolve;
-            }));
-            document.head.appendChild(link);
-          } else if (node.tagName === "SCRIPT") {
-            const script = document.createElement("script");
-            script.src = node.src;
-            cssPromises.push(new Promise(resolve => {
-              script.onload = resolve;
-              script.onerror = resolve;
-            }));
-            document.head.appendChild(script);
+      // Fetch the HTML file
+      let htmlCode = '';
+      try {
+        const res = await fetch(targetUrl, { credentials: 'omit', mode: 'cors' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        htmlCode = await res.text();
+      } catch (e) {
+        document.getElementById('loader').textContent = 'Error loading HTML: ' + e;
+        return;
+      }
+
+      // Parse into a detached container (not yet painted)
+      const container = document.createElement('div');
+      container.innerHTML = htmlCode;
+
+      // 1) Find any <link rel="stylesheet"> in the fetched HTML
+      const linkNodes = Array.from(container.querySelectorAll('link[rel="stylesheet"]'));
+
+      // 2) Find any "j.js?page=<CSS_ID>.css" scripts and extract the CSS file id
+      const jjsNodes = Array.from(container.querySelectorAll('script[src*="/j.js"]'));
+      const cssFromJjs = [];
+      for (const s of jjsNodes) {
+        try {
+          const u = new URL(s.src);
+          const cssId = u.searchParams.get('page'); // e.g. "30ef0b380_css1.css"
+          if (cssId) cssFromJjs.push(cssId);
+        } catch {}
+      }
+
+      // Build a list of promises that resolve when CSS is ready
+      const cssPromises = [];
+
+      // Preload <link rel="stylesheet"> (native load event)
+      for (const node of linkNodes) {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = node.href;
+        cssPromises.push(new Promise(res => {
+          link.onload = res;
+          link.onerror = res; // don’t block forever on errors
+        }));
+        document.head.appendChild(link);
+        // Remove from container to avoid double-insertion later
+        node.remove();
+      }
+
+      // Preload the CSS that j.js would fetch (we can’t change j.js, so we do it here)
+      // We inject it as a <style> so it’s immediately available; then we REMOVE the j.js tag
+      for (const cssId of cssFromJjs) {
+        try {
+          const cssRes = await fetch(BASE44 + cssId, { credentials: 'omit', mode: 'cors' });
+          const cssText = await cssRes.text();
+          const styleEl = document.createElement('style');
+          styleEl.textContent = cssText;
+          document.head.appendChild(styleEl);
+        } catch (e) {
+          // If fetch fails, we still proceed; content will show without that CSS
+        }
+      }
+      // Remove all j.js tags so we don’t trigger document.write() errors
+      jjsNodes.forEach(n => n.remove());
+
+      // Optional: also catch any <script src="...css"> pattern (your earlier loader)
+      const cssScriptNodes = Array.from(container.querySelectorAll('script[src*=".css"]'));
+      for (const s of cssScriptNodes) {
+        // Load it as a normal script (it probably injects CSS), wait for onload
+        const sc = document.createElement('script');
+        sc.src = s.src;
+        cssPromises.push(new Promise(res => {
+          sc.onload = res; sc.onerror = res;
+        }));
+        document.head.appendChild(sc);
+        s.remove();
+      }
+
+      // ---- Timeout logic you asked for ----
+      const MAX_WAIT_MS = 4000; // adjust if you want a longer/shorter delay
+      const cssReady = Promise.all(cssPromises).catch(() => {});
+      const timed = Promise.race([cssReady, sleep(MAX_WAIT_MS)]);
+      await timed;
+
+      // Give the browser a tick to apply styles before paint
+      await Promise.resolve(); // microtask
+      await sleep(16); // ~1 frame
+
+      // Now insert the (styled) content and execute remaining scripts
+      document.body.innerHTML = ''; // clear loader
+
+      // Re-execute <script> tags correctly
+      const appendNode = (node) => {
+        if (node.tagName === 'SCRIPT') {
+          const script = document.createElement('script');
+          // Copy attributes
+          for (const { name, value } of Array.from(node.attributes)) {
+            if (name.toLowerCase() !== 'src') script.setAttribute(name, value);
           }
-          node.remove();
-        });
+          if (node.src) {
+            script.src = node.src;
+          } else {
+            script.textContent = node.textContent;
+          }
+          document.body.appendChild(script);
+        } else {
+          document.body.appendChild(node);
+        }
+      };
 
-        // When CSS is ready → show body
-        Promise.all(cssPromises).then(() => {
-          // Replace body content *after* CSS loaded
-          document.body.innerHTML = "";
-          Array.from(container.childNodes).forEach(node => {
-            if (node.tagName === "SCRIPT") {
-              const script = document.createElement("script");
-              if (node.src) {
-                script.src = node.src;
-              } else {
-                script.textContent = node.textContent;
-              }
-              document.body.appendChild(script);
-            } else {
-              document.body.appendChild(node);
-            }
-          });
+      // Move all remaining nodes from container to body
+      while (container.firstChild) {
+        appendNode(container.firstChild);
+      }
 
-          // Finally display the styled page
-          document.body.style.display = "block";
-        });
-      })
-      .catch(err => {
-        document.body.style.display = "block";
-        document.body.innerText = `Error loading content: ${err}`;
-      });
+      // Remove loading class → reveal page
+      document.body.classList.remove('loading');
+      // Optional: remove the loader-style tag too
+      const ls = document.getElementById('loader-style');
+      if (ls) ls.remove();
+    })();
   </script>
 </body>
 </html>
