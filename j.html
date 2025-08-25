@@ -9,22 +9,40 @@
   <div id="content">Loading...</div>
 
   <script>
-    // Get the page ID from the query string ?page=...
     const params = new URLSearchParams(window.location.search);
     const htmlFile = params.get('page');
-
     const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
 
     fetch(targetUrl)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.text();
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        return res.text();
       })
       .then(htmlCode => {
-        // Render fetched HTML into the page
-        document.body.innerHTML = htmlCode;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlCode, 'text/html');
+
+        // Clear current head except base styles/meta
+        document.head.querySelectorAll(':not(meta):not(title):not(base):not(style)').forEach(el => el.remove());
+
+        // Inject <head> tags from the remote page
+        doc.head.querySelectorAll('link, meta, style, title').forEach(tag => {
+          document.head.appendChild(tag.cloneNode(true));
+        });
+
+        // Replace body content
+        document.body.innerHTML = doc.body.innerHTML;
+
+        // Re-run all script tags
+        doc.querySelectorAll('script').forEach(oldScript => {
+          const newScript = document.createElement('script');
+          if (oldScript.src) {
+            newScript.src = oldScript.src;
+          } else {
+            newScript.textContent = oldScript.textContent;
+          }
+          document.body.appendChild(newScript);
+        });
       })
       .catch(err => {
         document.getElementById('content').innerText = `Error loading content: ${err}`;
