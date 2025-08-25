@@ -3,24 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HTML Loader</title>
+  <title>Remote Page Loader</title>
+
+  <!-- Hide content until CSS loads -->
   <style>
-    /* Keep body hidden until CSS and head scripts finish loading */
     body {
       visibility: hidden;
       margin: 0;
     }
   </style>
-</head>
-<body>
-  <div id="content">Loading...</div>
 
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const htmlFile = params.get('page');
-    const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
+    document.addEventListener("DOMContentLoaded", () => {
+      const params = new URLSearchParams(window.location.search);
+      const htmlFile = params.get('page');
+      if (!htmlFile) {
+        document.body.innerHTML = "<h2>No page specified!</h2>";
+        document.body.style.visibility = 'visible';
+        return;
+      }
+      const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
+      loadPage(targetUrl);
+    });
 
-    async function loadPage() {
+    async function loadPage(targetUrl) {
       try {
         const response = await fetch(targetUrl);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -29,19 +35,12 @@
         const parser = new DOMParser();
         const doc = parser.parseFromString(htmlCode, 'text/html');
 
-        // --------------------
-        // 1. Inject <head> content
-        // --------------------
         const cssPromises = [];
         const scriptPromises = [];
 
-        // Remove old dynamically injected head elements
-        document.head.querySelectorAll('.dynamic-head').forEach(el => el.remove());
-
-        // Inject meta, title, link, and style tags
+        // Inject <head> content (meta, title, css, inline styles)
         doc.head.querySelectorAll('meta, title, link[rel="stylesheet"], style').forEach(tag => {
           const clone = tag.cloneNode(true);
-          clone.classList.add('dynamic-head');
           if (clone.tagName === 'LINK' && clone.rel === 'stylesheet') {
             cssPromises.push(new Promise(resolve => {
               clone.onload = resolve;
@@ -51,10 +50,9 @@
           document.head.appendChild(clone);
         });
 
-        // Inject scripts in <head>
+        // Inject <head> scripts
         doc.head.querySelectorAll('script').forEach(tag => {
           const newScript = document.createElement('script');
-          newScript.classList.add('dynamic-head');
           if (tag.src) {
             newScript.src = tag.src;
             scriptPromises.push(new Promise(resolve => {
@@ -67,17 +65,13 @@
           document.head.appendChild(newScript);
         });
 
-        // --------------------
-        // 2. Wait for CSS and head scripts to load
-        // --------------------
+        // Wait until head CSS/JS is ready
         await Promise.all([...cssPromises, ...scriptPromises]);
 
-        // --------------------
-        // 3. Inject body content
-        // --------------------
+        // Inject <body> content
         document.body.innerHTML = doc.body.innerHTML;
 
-        // Execute <script> tags in the body
+        // Inject and execute <body> scripts
         doc.body.querySelectorAll('script').forEach(tag => {
           const newScript = document.createElement('script');
           if (tag.src) {
@@ -88,16 +82,18 @@
           document.body.appendChild(newScript);
         });
 
-        // Finally, reveal body
+        // Finally show the body
         document.body.style.visibility = 'visible';
-
       } catch (err) {
         document.body.style.visibility = 'visible';
-        document.getElementById('content').innerText = `Error loading content: ${err}`;
+        document.body.innerHTML = `<h2>Error loading content:</h2><pre>${err}</pre>`;
       }
     }
-
-    loadPage();
   </script>
+</head>
+
+<body>
+  <!-- Placeholder shown if no content loads -->
+  <h2 style="text-align:center; padding:2em;">Loading remote page...</h2>
 </body>
 </html>
