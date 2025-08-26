@@ -8,44 +8,46 @@
 <body>
   <div id="content">Loading page...</div>
 
-<script>
-  const params = new URLSearchParams(window.location.search);
-  const htmlFile = params.get('page');
+  <script>
+    // Get the page ID from the query string ?page=...
+    const params = new URLSearchParams(window.location.search);
+    const htmlFile = params.get('page');
 
-  const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
+    const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
 
-  fetch(targetUrl)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return response.text();
-    })
-    .then(htmlCode => {
-      // Create a container and parse the HTML
-      const container = document.createElement("div");
-      container.innerHTML = htmlCode;
-
-      // Replace body content with parsed nodes
-      document.body.innerHTML = "";
-      Array.from(container.childNodes).forEach(node => {
-        if (node.tagName === "SCRIPT") {
-          const script = document.createElement("script");
-          if (node.src) {
-            script.src = node.src; // external script
-          } else {
-            script.textContent = node.textContent; // inline script
-          }
-          document.body.appendChild(script);
-        } else {
-          document.body.appendChild(node);
+    fetch(targetUrl)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
-      });
-    })
-    .catch(err => {
-      document.getElementById('content').innerText = `Error loading content: ${err}`;
-    });
-</script>
+        return response.text();
+      })
+      .then(htmlCode => {
+        // Put HTML into a temp container
+        const container = document.createElement("div");
+        container.innerHTML = htmlCode;
 
+        // Clear body
+        document.body.innerHTML = "";
+
+        // Append everything, making scripts executable
+        Array.from(container.childNodes).forEach(node => {
+          if (node.tagName === "SCRIPT") {
+            const script = document.createElement("script");
+            if (node.src) {
+              script.src = node.src;   // external script
+            } else {
+              script.textContent = node.textContent; // inline script
+            }
+            document.body.appendChild(script);
+          } else {
+            document.body.appendChild(node.cloneNode(true));
+          }
+        });
+      })
+      .catch(err => {
+        document.getElementById('content').innerText = `Error loading content: ${err}`;
+      });
+  </script>
 </body>
 </html>
