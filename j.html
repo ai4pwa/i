@@ -1,3 +1,13 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HTML Loader</title>
+</head>
+<body>
+  <div id="content">Loading page...</div>
+
 <script>
   const params = new URLSearchParams(window.location.search);
   const htmlFile = params.get('page');
@@ -36,3 +46,6 @@
       document.getElementById('content').innerText = `Error loading content: ${err}`;
     });
 </script>
+
+</body>
+</html>
