@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
   <style>
-    body { visibility: hidden; } /* hide content initially */
+    body { visibility: hidden; margin:0; }
     #loader { }
   </style>
 </head>
@@ -38,7 +38,7 @@
           node.remove();
         });
 
-        // Delay before injecting content to allow CSS to load
+        // Wait 600ms to allow CSS to apply
         setTimeout(() => {
           document.body.innerHTML = "";
           Array.from(container.childNodes).forEach(node => {
@@ -51,8 +51,8 @@
               document.body.appendChild(node);
             }
           });
-          document.body.style.visibility = "visible";
-        }, 500); // 500ms delay (adjust if needed)
+          document.body.style.visibility = "visible"; // reveal styled content
+        }, 600);
       })
       .catch(err => {
         document.body.innerHTML = `Error loading content: ${err}`;
