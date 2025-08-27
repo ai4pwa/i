@@ -88,7 +88,7 @@
         const fallback = setTimeout(() => {
           clearInterval(interval);
           tryInject();
-        }, 1000);
+        }, 10000);
       })
       .catch(err => {
         document.getElementById("loader").innerText = `Error loading content: ${err}`;
