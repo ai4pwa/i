@@ -4,12 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
-  <style>
-    body { visibility: hidden; } /* hide all content until reveal */
-  </style>
 </head>
 <body>
-  Loading page...
+  <div id="loader">Loading page...</div>
 
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -17,45 +14,63 @@
     const targetUrl = `https://base44.app/api/apps/686424824d7b61721eac3e29/files/${htmlFile}`;
 
     fetch(targetUrl)
-      .then(res => res.ok ? res.text() : Promise.reject(`HTTP ${res.status}`))
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        return response.text();
+      })
       .then(htmlCode => {
-        const container = document.createElement("div");
-        container.innerHTML = htmlCode;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlCode, "text/html");
 
-        // Move CSS loaders (<link> or <script src="...css">) into <head>
-        container.querySelectorAll("link[rel='stylesheet'], script[src*='.css']").forEach(node => {
-          if (node.tagName === "LINK") {
-            const link = document.createElement("link");
-            link.rel = "stylesheet";
-            link.href = node.href;
-            document.head.appendChild(link);
-          } else if (node.tagName === "SCRIPT") {
-            const script = document.createElement("script");
-            script.src = node.src;
-            document.head.appendChild(script);
+        // --- 1. Inject <head> ---
+        document.head.innerHTML = ""; // clear loader's head
+        for (let node of doc.head.children) {
+          document.head.appendChild(node.cloneNode(true));
+        }
+
+        // Extract <body> content but don't inject yet
+        const bodyContent = doc.body.innerHTML;
+
+        // --- 2. Test if CSS loaded ---
+        let cssLoaded = false;
+
+        // Create a hidden test element to check CSS effect
+        const testEl = document.createElement("div");
+        testEl.textContent = "test";
+        testEl.style.display = "none"; // keep it hidden
+        document.body.appendChild(testEl);
+
+        function checkCSS() {
+          // Example: check if computed style of <h1> is not default
+          const h1 = document.createElement("h1");
+          h1.textContent = "probe";
+          h1.style.position = "absolute";
+          h1.style.visibility = "hidden";
+          document.body.appendChild(h1);
+
+          const computed = window.getComputedStyle(h1);
+          // crude test: see if font-size != browser default 2em
+          if (computed.fontSize !== "2em") {
+            cssLoaded = true;
           }
-          node.remove();
-        });
+          h1.remove();
+        }
 
-        // Wait 600ms before injecting content to avoid FOUC
-        setTimeout(() => {
-          document.body.innerHTML = "";
-          Array.from(container.childNodes).forEach(node => {
-            if (node.tagName === "SCRIPT") {
-              const script = document.createElement("script");
-              if (node.src) script.src = node.src;
-              else script.textContent = node.textContent;
-              document.body.appendChild(script);
-            } else {
-              document.body.appendChild(node);
-            }
-          });
-          document.body.style.visibility = "visible";
-        }, 600);
+        checkCSS();
+
+        // --- 3. Inject <body> when ready ---
+        const finish = () => {
+          document.body.innerHTML = bodyContent;
+        };
+
+        if (cssLoaded) {
+          finish();
+        } else {
+          setTimeout(finish, 1000);
+        }
       })
       .catch(err => {
-        document.body.innerHTML = `Error loading content: ${err}`;
-        document.body.style.visibility = "visible";
+        document.getElementById("loader").innerText = `Error loading content: ${err}`;
       });
   </script>
 </body>
