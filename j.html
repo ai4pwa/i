@@ -34,10 +34,10 @@
           }
         }
 
-        // --- 2. Save body nodes for later ---
+        // --- 2. Save <body> for later ---
         const bodyNodes = Array.from(doc.body.childNodes);
 
-        // --- 3. Function to inject <body> ---
+        // --- 3. Function to inject body ---
         const injectBody = () => {
           document.body.innerHTML = ""; // clear loader
           bodyNodes.forEach(node => {
@@ -52,24 +52,22 @@
           });
         };
 
-        // --- 4. Detect if CSS has applied ---
+        // --- 4. CSS detection ---
         function cssSeemsLoaded() {
-          // Insert hidden probe
-          const probe = document.createElement("h1");
-          probe.textContent = "probe";
-          probe.style.position = "absolute";
-          probe.style.visibility = "hidden";
-          document.body.appendChild(probe);
-
-          const computed = window.getComputedStyle(probe);
-          const loaded = computed.fontSize !== "2em"; // default UA style for <h1>
-          probe.remove();
-          return loaded;
+          try {
+            for (const sheet of document.styleSheets) {
+              if (sheet.cssRules && sheet.cssRules.length > 0) {
+                return true; // found stylesheet rules
+              }
+            }
+          } catch (e) {
+            // cross-origin stylesheet may throw → ignore
+          }
+          return false;
         }
 
-        // --- 5. Keep checking until CSS loaded or timeout ---
+        // --- 5. Poll until CSS loaded or fallback ---
         let done = false;
-
         const tryInject = () => {
           if (!done) {
             done = true;
