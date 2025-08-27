@@ -23,51 +23,72 @@
         const doc = parser.parseFromString(htmlCode, "text/html");
 
         // --- 1. Inject <head> ---
-        document.head.innerHTML = ""; // clear loader's head
         for (let node of doc.head.children) {
-          document.head.appendChild(node.cloneNode(true));
-        }
-
-        // Extract <body> content but don't inject yet
-        const bodyContent = doc.body.innerHTML;
-
-        // --- 2. Test if CSS loaded ---
-        let cssLoaded = false;
-
-        // Create a hidden test element to check CSS effect
-        const testEl = document.createElement("div");
-        testEl.textContent = "test";
-        testEl.style.display = "none"; // keep it hidden
-        document.body.appendChild(testEl);
-
-        function checkCSS() {
-          // Example: check if computed style of <h1> is not default
-          const h1 = document.createElement("h1");
-          h1.textContent = "probe";
-          h1.style.position = "absolute";
-          h1.style.visibility = "hidden";
-          document.body.appendChild(h1);
-
-          const computed = window.getComputedStyle(h1);
-          // crude test: see if font-size != browser default 2em
-          if (computed.fontSize !== "2em") {
-            cssLoaded = true;
+          if (node.tagName === "SCRIPT") {
+            const s = document.createElement("script");
+            if (node.src) s.src = node.src;
+            else s.textContent = node.textContent;
+            document.head.appendChild(s);
+          } else {
+            document.head.appendChild(node.cloneNode(true));
           }
-          h1.remove();
         }
 
-        checkCSS();
+        // --- 2. Save body nodes for later ---
+        const bodyNodes = Array.from(doc.body.childNodes);
 
-        // --- 3. Inject <body> when ready ---
-        const finish = () => {
-          document.body.innerHTML = bodyContent;
+        // --- 3. Function to inject <body> ---
+        const injectBody = () => {
+          document.body.innerHTML = ""; // clear loader
+          bodyNodes.forEach(node => {
+            if (node.tagName === "SCRIPT") {
+              const s = document.createElement("script");
+              if (node.src) s.src = node.src;
+              else s.textContent = node.textContent;
+              document.body.appendChild(s);
+            } else {
+              document.body.appendChild(node.cloneNode(true));
+            }
+          });
         };
 
-        if (cssLoaded) {
-          finish();
-        } else {
-          setTimeout(finish, 1000);
+        // --- 4. Detect if CSS has applied ---
+        function cssSeemsLoaded() {
+          // Insert hidden probe
+          const probe = document.createElement("h1");
+          probe.textContent = "probe";
+          probe.style.position = "absolute";
+          probe.style.visibility = "hidden";
+          document.body.appendChild(probe);
+
+          const computed = window.getComputedStyle(probe);
+          const loaded = computed.fontSize !== "2em"; // default UA style for <h1>
+          probe.remove();
+          return loaded;
         }
+
+        // --- 5. Keep checking until CSS loaded or timeout ---
+        let done = false;
+
+        const tryInject = () => {
+          if (!done) {
+            done = true;
+            injectBody();
+          }
+        };
+
+        const interval = setInterval(() => {
+          if (cssSeemsLoaded()) {
+            clearInterval(interval);
+            clearTimeout(fallback);
+            tryInject();
+          }
+        }, 100);
+
+        const fallback = setTimeout(() => {
+          clearInterval(interval);
+          tryInject();
+        }, 1000);
       })
       .catch(err => {
         document.getElementById("loader").innerText = `Error loading content: ${err}`;
