@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File Viewer</title>
+</head>
+<body>
+  <pre id="fileContent">Loading page...</pre>
+
+  <script>
+    function getQueryParam(name) {
+      return new URLSearchParams(window.location.search).get(name);
+    }
+
+    const uniqueId = getQueryParam("unique_id");
+    const contentDiv = document.getElementById("fileContent");
+
+    if (!uniqueId) {
+      contentDiv.textContent = "Error: No file ID provided.";
+    } else {
+      fetch("https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord?user_id=user_jveo8b35q_1748241619184&payload.unique_id=" + uniqueId, {
+        headers: {
+          "api_key": "69315aa5aa7f4b6fa99c7a420da68bdd",
+          "Content-Type": "application/json"
+        }
+      })
+      .then(res => res.json())
+      .then(records => {
+        if (records.length === 0) {
+          contentDiv.textContent = "File not found.";
+        } else {
+          const file = records[0].payload;
+          try {
+            // decode base64 into raw text
+            contentDiv.textContent = atob(file.file_content);
+          } catch (e) {
+            contentDiv.textContent = "Error decoding file content.";
+          }
+        }
+      })
+      .catch(() => {
+        contentDiv.textContent = "Error loading file.";
+      });
+    }
+  </script>
+</body>
+</html>
