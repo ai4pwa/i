@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HTML Loader</title>
+</head>
+<body>
+  <div id="loader">Loading page...</div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const htmlFile = params.get('unique_id');
+    const targetUrl = `https://ai4pwa.github.io/i/lh.html?unique_id=${htmlFile}`;
+
+    fetch(targetUrl)
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        return response.text();
+      })
+      .then(htmlCode => {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlCode, "text/html");
+
+        // --- 1. Inject <head> ---
+        for (let node of doc.head.children) {
+          if (node.tagName === "SCRIPT") {
+            const s = document.createElement("script");
+            if (node.src) s.src = node.src;
+            else s.textContent = node.textContent;
+            document.head.appendChild(s);
+          } else {
+            document.head.appendChild(node.cloneNode(true));
+          }
+        }
+
+        // --- 2. Save <body> for later ---
+        const bodyNodes = Array.from(doc.body.childNodes);
+
+        // --- 3. Function to inject body ---
+        const injectBody = () => {
+          document.body.innerHTML = ""; // clear loader
+          bodyNodes.forEach(node => {
+            if (node.tagName === "SCRIPT") {
+              const s = document.createElement("script");
+              if (node.src) s.src = node.src;
+              else s.textContent = node.textContent;
+              document.body.appendChild(s);
+            } else {
+              document.body.appendChild(node.cloneNode(true));
+            }
+          });
+        };
+
+        // --- 4. CSS detection ---
+        function cssSeemsLoaded() {
+          try {
+            for (const sheet of document.styleSheets) {
+              if (sheet.cssRules && sheet.cssRules.length > 0) {
+                return true; // found stylesheet rules
+              }
+            }
+          } catch (e) {
+            // cross-origin stylesheet may throw → ignore
+          }
+          return false;
+        }
+
+        // --- 5. Poll until CSS loaded or fallback ---
+        let done = false;
+        const tryInject = () => {
+          if (!done) {
+            done = true;
+            injectBody();
+          }
+        };
+
+        const interval = setInterval(() => {
+          if (cssSeemsLoaded()) {
+            clearInterval(interval);
+            clearTimeout(fallback);
+            tryInject();
+          }
+        }, 100);
+
+        const fallback = setTimeout(() => {
+          clearInterval(interval);
+          tryInject();
+        }, 10000);
+      })
+      .catch(err => {
+        document.getElementById("loader").innerText = `Error loading content: ${err}`;
+      });
+  </script>
+</body>
+</html>
