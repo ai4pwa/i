@@ -11,86 +11,101 @@
   <script>
     const params = new URLSearchParams(window.location.search);
     const htmlFile = params.get('unique_id');
-    const targetUrl = `https://ai4pwa.github.io/i/lh.html?unique_id=${htmlFile}`;
 
-    fetch(targetUrl)
-      .then(response => {
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        return response.text();
+    if (!htmlFile) {
+      document.getElementById("loader").innerText = "Error: No unique_id provided.";
+    } else {
+      const apiUrl =
+        "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
+        "?user_id=user_jveo8b35q_1748241619184" +
+        "&payload.unique_id=" +
+        htmlFile;
+
+      fetch(apiUrl, {
+        headers: {
+          api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
+          "Content-Type": "application/json",
+        },
       })
-      .then(htmlCode => {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(htmlCode, "text/html");
+        .then(res => res.json())
+        .then(records => {
+          if (!records.length) throw new Error("HTML file not found.");
+          const base64Content = records[0].payload.file_content;
+          const htmlCode = atob(base64Content);
 
-        // --- 1. Inject <head> ---
-        for (let node of doc.head.children) {
-          if (node.tagName === "SCRIPT") {
-            const s = document.createElement("script");
-            if (node.src) s.src = node.src;
-            else s.textContent = node.textContent;
-            document.head.appendChild(s);
-          } else {
-            document.head.appendChild(node.cloneNode(true));
-          }
-        }
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(htmlCode, "text/html");
 
-        // --- 2. Save <body> for later ---
-        const bodyNodes = Array.from(doc.body.childNodes);
-
-        // --- 3. Function to inject body ---
-        const injectBody = () => {
-          document.body.innerHTML = ""; // clear loader
-          bodyNodes.forEach(node => {
+          // --- 1. Inject <head> ---
+          for (let node of doc.head.children) {
             if (node.tagName === "SCRIPT") {
               const s = document.createElement("script");
               if (node.src) s.src = node.src;
               else s.textContent = node.textContent;
-              document.body.appendChild(s);
+              document.head.appendChild(s);
             } else {
-              document.body.appendChild(node.cloneNode(true));
+              document.head.appendChild(node.cloneNode(true));
             }
-          });
-        };
+          }
 
-        // --- 4. CSS detection ---
-        function cssSeemsLoaded() {
-          try {
-            for (const sheet of document.styleSheets) {
-              if (sheet.cssRules && sheet.cssRules.length > 0) {
-                return true; // found stylesheet rules
+          // --- 2. Save <body> for later ---
+          const bodyNodes = Array.from(doc.body.childNodes);
+
+          // --- 3. Function to inject body ---
+          const injectBody = () => {
+            document.body.innerHTML = ""; // clear loader
+            bodyNodes.forEach(node => {
+              if (node.tagName === "SCRIPT") {
+                const s = document.createElement("script");
+                if (node.src) s.src = node.src;
+                else s.textContent = node.textContent;
+                document.body.appendChild(s);
+              } else {
+                document.body.appendChild(node.cloneNode(true));
               }
+            });
+          };
+
+          // --- 4. CSS detection ---
+          function cssSeemsLoaded() {
+            try {
+              for (const sheet of document.styleSheets) {
+                if (sheet.cssRules && sheet.cssRules.length > 0) {
+                  return true; // found stylesheet rules
+                }
+              }
+            } catch (e) {
+              // cross-origin stylesheet may throw → ignore
             }
-          } catch (e) {
-            // cross-origin stylesheet may throw → ignore
+            return false;
           }
-          return false;
-        }
 
-        // --- 5. Poll until CSS loaded or fallback ---
-        let done = false;
-        const tryInject = () => {
-          if (!done) {
-            done = true;
-            injectBody();
-          }
-        };
+          // --- 5. Poll until CSS loaded or fallback ---
+          let done = false;
+          const tryInject = () => {
+            if (!done) {
+              done = true;
+              injectBody();
+            }
+          };
 
-        const interval = setInterval(() => {
-          if (cssSeemsLoaded()) {
+          const interval = setInterval(() => {
+            if (cssSeemsLoaded()) {
+              clearInterval(interval);
+              clearTimeout(fallback);
+              tryInject();
+            }
+          }, 100);
+
+          const fallback = setTimeout(() => {
             clearInterval(interval);
-            clearTimeout(fallback);
             tryInject();
-          }
-        }, 100);
-
-        const fallback = setTimeout(() => {
-          clearInterval(interval);
-          tryInject();
-        }, 10000);
-      })
-      .catch(err => {
-        document.getElementById("loader").innerText = `Error loading content: ${err}`;
-      });
+          }, 10000);
+        })
+        .catch(err => {
+          document.getElementById("loader").innerText = `Error loading content: ${err}`;
+        });
+    }
   </script>
 </body>
 </html>
