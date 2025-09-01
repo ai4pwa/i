@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dynamic Video Loader</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      color: #ccc;
+      font-family: monospace;
+      height: 100%;
+    }
+    #loader {
+      font-size: 14px;
+    }
+    video {
+      max-width: 100%;
+      max-height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="loader">Loading video...</div>
+  <video id="dynamicVideo" controls style="display:none;"></video>
+
+  <script>
+    (function () {
+      function getParam(name) {
+        const url = new URL(window.location.href);
+        return url.searchParams.get(name);
+      }
+
+      const uniqueId = getParam("unique_id");
+      if (!uniqueId) {
+        document.getElementById("loader").textContent = "Error: No unique_id.";
+        return;
+      }
+
+      const apiUrl =
+        "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
+        "?user_id=user_jveo8b35q_1748241619184" +
+        "&payload.unique_id=" + uniqueId;
+
+      fetch(apiUrl, {
+        headers: {
+          "api_key": "69315aa5aa7f4b6fa99c7a420da68bdd",
+          "Content-Type": "application/json"
+        }
+      })
+        .then(res => res.json())
+        .then(records => {
+          if (!records.length) {
+            document.getElementById("loader").textContent = "Video not found.";
+            return;
+          }
+
+          const base64Content = records[0].payload.file_content;
+          const fileName = records[0].payload.file_name || "video.mp4";
+          let mime = "video/mp4";
+
+          // Detect MIME type
+          if (fileName.endsWith(".webm")) mime = "video/webm";
+          if (fileName.endsWith(".ogg")) mime = "video/ogg";
+
+          const video = document.getElementById("dynamicVideo");
+          video.src = "data:" + mime + ";base64," + base64Content;
+          video.style.display = "block";
+          document.getElementById("loader").remove();
+        })
+        .catch(err => {
+          document.getElementById("loader").textContent = "Error loading video.";
+          console.error("lv.html error:", err);
+        });
+    })();
+  </script>
+</body>
+</html>
