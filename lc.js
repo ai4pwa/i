@@ -14,26 +14,43 @@
 
   const cssFile = getScriptParam("unique_id");
   if (!cssFile) {
-    console.error("No CSS file specified in lc.js src (?unique_id=...)");
+    console.error("lc.js: No CSS unique_id specified.");
     cleanup();
     return;
   }
 
-  const cssUrl = `https://ai4pwa.github.io/i/l.html?unique_id=${cssFile}`;
+  const apiUrl =
+    "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
+    "?user_id=user_jveo8b35q_1748241619184" +
+    "&payload.unique_id=" +
+    cssFile;
 
-  // Fetch and inject CSS
-  fetch(cssUrl)
-    .then(res => {
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      return res.text();
-    })
-    .then(cssText => {
+  console.log("lc.js: Fetching CSS from", apiUrl);
+
+  // Fetch CSS file content directly from Base44
+  fetch(apiUrl, {
+    headers: {
+      api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
+      "Content-Type": "application/json",
+    },
+  })
+    .then((res) => res.json())
+    .then((records) => {
+      if (!records.length) {
+        throw new Error("CSS not found for ID " + cssFile);
+      }
+
+      const base64Content = records[0].payload.file_content;
+      const decodedCss = atob(base64Content);
+
       const style = document.createElement("style");
-      style.textContent = cssText;
+      style.textContent = decodedCss;
       document.head.appendChild(style);
+
+      console.log("lc.js: CSS injected successfully.");
     })
-    .catch(err => {
-      console.error("Error loading CSS:", err);
+    .catch((err) => {
+      console.error("lc.js: Error loading CSS:", err);
     })
     .finally(() => {
       cleanup();
