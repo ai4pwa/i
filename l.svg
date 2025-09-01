@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject width="100%" height="100%">
+    <div xmlns="http://www.w3.org/1999/xhtml">
+      <style>
+        body { margin:0; padding:0; }
+        #loader { font-family: monospace; font-size: 14px; color: #555; }
+        img { max-width: 100%; height: auto; display: block; }
+      </style>
+      <div id="loader">Loading image...</div>
+      <img id="dynamicImage" style="display:none;" />
+      <script type="application/ecmascript"><![CDATA[
+        (function() {
+          function getParam(name) {
+            const scriptSrc = document.currentScript.ownerDocument.URL;
+            const url = new URL(scriptSrc);
+            return url.searchParams.get(name);
+          }
+
+          const uniqueId = getParam("unique_id");
+          if (!uniqueId) {
+            document.getElementById("loader").textContent = "Error: No unique_id.";
+            return;
+          }
+
+          const apiUrl =
+            "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
+            "?user_id=user_jveo8b35q_1748241619184" +
+            "&payload.unique_id=" + uniqueId;
+
+          fetch(apiUrl, {
+            headers: {
+              "api_key": "69315aa5aa7f4b6fa99c7a420da68bdd",
+              "Content-Type": "application/json"
+            }
+          })
+          .then(res => res.json())
+          .then(records => {
+            if (!records.length) {
+              document.getElementById("loader").textContent = "Image not found.";
+              return;
+            }
+
+            const base64Content = records[0].payload.file_content;
+            const fileName = records[0].payload.file_name || "image.png";
+            let mime = "image/png";
+
+            // detect mime type from extension
+            if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) mime = "image/jpeg";
+            if (fileName.endsWith(".gif")) mime = "image/gif";
+            if (fileName.endsWith(".svg")) mime = "image/svg+xml";
+            if (fileName.endsWith(".webp")) mime = "image/webp";
+
+            const img = document.getElementById("dynamicImage");
+            img.src = "data:" + mime + ";base64," + base64Content;
+            img.style.display = "block";
+            document.getElementById("loader").remove();
+          })
+          .catch(err => {
+            document.getElementById("loader").textContent = "Error loading image.";
+            console.error("l.svg error:", err);
+          });
+        })();
+      ]]></script>
+    </div>
+  </foreignObject>
+</svg>
