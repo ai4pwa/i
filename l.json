@@ -1,12 +1,15 @@
-(async function () {
-  console.log("l.json: Request started...");
+(function () {
+  console.log("l.json: Loader started...");
 
-  const isScript = !!document.currentScript; // Check if running via <script>
-  const scriptSrc = isScript ? document.currentScript.src : window.location.href;
+  // Get unique_id from script src
+  const currentScript = document.currentScript;
+  const scriptSrc = currentScript ? currentScript.src : "";
   const uniqueId = new URL(scriptSrc).searchParams.get("unique_id");
 
+  console.log("l.json: unique_id =", uniqueId);
+
   if (!uniqueId) {
-    console.error("l.json: No unique_id provided.");
+    console.error("l.json: No unique_id provided in script src.");
     return;
   }
 
@@ -16,39 +19,44 @@
     "&payload.unique_id=" +
     uniqueId;
 
-  try {
-    const res = await fetch(url, {
-      headers: {
-        api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
-        "Content-Type": "application/json",
-      },
+  console.log("l.json: Fetching", url);
+
+  fetch(url, {
+    headers: {
+      api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
+      "Content-Type": "application/json",
+    },
+  })
+    .then((res) => res.json())
+    .then((records) => {
+      console.log("l.json: Records response", records);
+      if (!records.length) {
+        console.error("l.json: JSON file not found for ID", uniqueId);
+        return;
+      }
+
+      const file = records[0].payload;
+      let decoded;
+      try {
+        decoded = atob(file.file_content);
+        console.log("l.json: Decoded JSON ->", decoded);
+      } catch (e) {
+        console.error("l.json: Failed to decode JSON content.", e);
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(decoded);
+        console.log("l.json: Parsed JSON object ->", parsed);
+
+        // Make available globally
+        window.jsonData = parsed;
+        console.log("l.json: JSON object stored as window.jsonData");
+      } catch (e) {
+        console.error("l.json: Invalid JSON format ->", e);
+      }
+    })
+    .catch((err) => {
+      console.error("l.json: Failed to fetch JSON.", err);
     });
-    const records = await res.json();
-
-    if (!records.length) {
-      console.error("l.json: JSON not found for ID", uniqueId);
-      return;
-    }
-
-    const base64Content = records[0].payload.file_content;
-    const decoded = atob(base64Content);
-    const jsonObject = JSON.parse(decoded);
-
-    if (isScript) {
-      // Script loader mode
-      window.jsonData = jsonObject;
-      console.log("l.json: JSON object available as window.jsonData");
-    } else {
-      // Fetch mode: return raw JSON
-      const response = new Response(JSON.stringify(jsonObject), {
-        headers: { "Content-Type": "application/json" },
-      });
-      const stream = await response.text();
-      document.open();
-      document.write(stream);
-      document.close();
-    }
-  } catch (err) {
-    console.error("l.json: Failed to fetch or parse JSON.", err);
-  }
 })();
