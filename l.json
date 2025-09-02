@@ -1,0 +1,49 @@
+(async function () {
+  console.log("l.json: Request started...");
+
+  const currentScript = document.currentScript;
+  const scriptSrc = currentScript ? currentScript.src : window.location.href;
+  const uniqueId = new URL(scriptSrc).searchParams.get("unique_id");
+
+  if (!uniqueId) {
+    console.error("l.json: No unique_id provided.");
+    return;
+  }
+
+  const url =
+    "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
+    "?user_id=user_jveo8b35q_1748241619184" +
+    "&payload.unique_id=" +
+    uniqueId;
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
+        "Content-Type": "application/json",
+      },
+    });
+    const records = await res.json();
+
+    if (!records.length) {
+      console.error("l.json: JSON not found for ID", uniqueId);
+      return;
+    }
+
+    const base64Content = records[0].payload.file_content;
+    const decoded = atob(base64Content);
+    const jsonObject = JSON.parse(decoded);
+
+    // Check if request is from fetch() or <script>
+    if (!currentScript) {
+      // Direct fetch: respond with raw JSON
+      document.write(JSON.stringify(jsonObject));
+    } else {
+      // Script loader: expose JSON globally
+      window.jsonData = jsonObject;
+      console.log("l.json: JSON object available as window.jsonData");
+    }
+  } catch (err) {
+    console.error("l.json: Failed to fetch or parse JSON.", err);
+  }
+})();
