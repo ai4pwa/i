@@ -1,8 +1,8 @@
 (async function () {
   console.log("l.json: Request started...");
 
-  const currentScript = document.currentScript;
-  const scriptSrc = currentScript ? currentScript.src : window.location.href;
+  const isScript = !!document.currentScript; // Check if running via <script>
+  const scriptSrc = isScript ? document.currentScript.src : window.location.href;
   const uniqueId = new URL(scriptSrc).searchParams.get("unique_id");
 
   if (!uniqueId) {
@@ -34,14 +34,19 @@
     const decoded = atob(base64Content);
     const jsonObject = JSON.parse(decoded);
 
-    // Check if request is from fetch() or <script>
-    if (!currentScript) {
-      // Direct fetch: respond with raw JSON
-      document.write(JSON.stringify(jsonObject));
-    } else {
-      // Script loader: expose JSON globally
+    if (isScript) {
+      // Script loader mode
       window.jsonData = jsonObject;
       console.log("l.json: JSON object available as window.jsonData");
+    } else {
+      // Fetch mode: return raw JSON
+      const response = new Response(JSON.stringify(jsonObject), {
+        headers: { "Content-Type": "application/json" },
+      });
+      const stream = await response.text();
+      document.open();
+      document.write(stream);
+      document.close();
     }
   } catch (err) {
     console.error("l.json: Failed to fetch or parse JSON.", err);
