@@ -19,7 +19,6 @@
 
   console.log("l.jsx: Fetching JSX from", apiUrl);
 
-  // Utility: load external script
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
@@ -31,7 +30,6 @@
     });
   }
 
-  // Ensure React, ReactDOM, Babel
   async function ensureReactEnv() {
     if (
       typeof React !== "undefined" &&
@@ -45,7 +43,6 @@
     await loadScript("https://unpkg.com/@babel/standalone/babel.min.js");
   }
 
-  // Ensure #root exists
   function ensureRootDiv() {
     let root = document.getElementById("root");
     if (!root) {
@@ -57,11 +54,13 @@
     return root;
   }
 
-  // Main runner
   async function run() {
     try {
       await ensureReactEnv();
-      ensureRootDiv();
+      const root = ensureRootDiv();
+
+      // Show placeholder while loading
+      root.innerText = "Loading page...";
 
       const res = await fetch(apiUrl, {
         headers: {
@@ -78,12 +77,14 @@
       // Transpile JSX → JS
       const transpiled = Babel.transform(decoded, { presets: ["react"] }).code;
 
-      // Execute transpiled code
+      // Execute transpiled code (will overwrite placeholder)
       new Function("React", "ReactDOM", transpiled)(React, ReactDOM);
 
       console.log("l.jsx: JSX executed successfully.");
     } catch (err) {
       console.error("l.jsx: Error ->", err);
+      const root = document.getElementById("root");
+      if (root) root.innerText = "Failed to load page.";
     }
   }
 
