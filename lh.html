@@ -4,10 +4,33 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
+
   <style>
     body { font-family: system-ui, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif; }
     [dir="auto"] { unicode-bidi: plaintext; }
     #loader { padding: 1rem; }
+
+    /* --- RTL FIXES FOR POPULAR CAROUSELS --- */
+
+    /* 1) Bootstrap 5 carousel RTL overrides (works even if using LTR CSS build) */
+    html[dir="rtl"] .carousel .carousel-item-next:not(.carousel-item-start),
+    html[dir="rtl"] .carousel .active.carousel-item-end {
+      transform: translateX(-100%);
+    }
+    html[dir="rtl"] .carousel .carousel-item-prev:not(.carousel-item-end),
+    html[dir="rtl"] .carousel .active.carousel-item-start {
+      transform: translateX(100%);
+    }
+    /* Optional: swap control icons alignment */
+    html[dir="rtl"] .carousel-control-prev { right: 0; left: auto; }
+    html[dir="rtl"] .carousel-control-next { left: 0; right: auto; }
+
+    /* 2) Swiper: make sure container picks up RTL */
+    html[dir="rtl"] .swiper,
+    html[dir="rtl"] .swiper-container { direction: rtl; }
+
+    /* 3) Slick: ensure base direction is RTL when needed */
+    html[dir="rtl"] .slick-slider { direction: rtl; }
   </style>
 </head>
 <body dir="auto">
@@ -24,7 +47,7 @@
     }
     function hasHebrew(str){ return /[\u0590-\u05FF]/.test(str); }
 
-    // Make late 'DOMContentLoaded' listeners fire immediately
+    // Make late 'DOMContentLoaded' listeners fire even after we inject HTML
     (function patchDOMContentLoaded(){
       const doc = document;
       if (doc.readyState !== 'loading') {
@@ -36,32 +59,34 @@
       }
     })();
 
-    // Load a <link rel="stylesheet"> and return a promise
     function loadStylesheet(linkEl) {
       return new Promise(resolve => {
         linkEl.addEventListener('load', resolve, { once: true });
-        linkEl.addEventListener('error', resolve, { once: true }); // don't block
-        // If it’s already loaded (some browsers), resolve next tick
+        linkEl.addEventListener('error', resolve, { once: true });
         setTimeout(resolve, 0);
       });
     }
-
+    function waitForImages(root) {
+      const imgs = Array.from((root || document).images).filter(img => !img.complete);
+      if (!imgs.length) return Promise.resolve();
+      return Promise.all(imgs.map(img => new Promise(res => {
+        img.addEventListener('load', res, { once: true });
+        img.addEventListener('error', res, { once: true });
+      })));
+    }
     function cloneElementWithAttributes(node) {
       const clone = document.createElement(node.tagName);
       for (const attr of node.attributes) clone.setAttribute(attr.name, attr.value);
       return clone;
     }
-
-    // Sequential script loader that preserves order
     async function runScriptsSequentially(scriptDescriptors) {
       for (const desc of scriptDescriptors) {
         await new Promise(resolve => {
           const s = document.createElement('script');
-          // copy all attributes (type, async, defer, crossorigin, integrity, nonce, etc.)
           for (const attr of desc.attributes) s.setAttribute(attr.name, attr.value);
           if (desc.src) {
             s.onload = () => resolve();
-            s.onerror = () => resolve(); // don't block on failures
+            s.onerror = () => resolve(); // don't block
             s.src = desc.src;
             (desc.place === 'head' ? document.head : document.body).appendChild(s);
           } else {
@@ -73,29 +98,60 @@
       }
     }
 
-    // Try to (re)initialize common carousels if libraries are present
-    function tryInitCarousels() {
-      // Bootstrap 4/5
+    // Try to (re)initialize common carousels with correct RTL + size
+    function tryInitCarousels(forceRTL) {
+      // Bootstrap 5
       if (window.bootstrap && bootstrap.Carousel) {
         document.querySelectorAll('.carousel').forEach(el => {
-          if (!bootstrap.Carousel.getInstance(el)) {
-            try { new bootstrap.Carousel(el); } catch {}
-          }
+          const inst = bootstrap.Carousel.getInstance(el) || new bootstrap.Carousel(el, {});
+          // Nudge layout after fonts/images load
+          try { inst.pause(); inst.cycle(); } catch {}
         });
       }
+
       // Swiper
       if (window.Swiper) {
         document.querySelectorAll('.swiper, .swiper-container').forEach(el => {
-          if (!el.__swiper) {
-            try { new Swiper(el, el.__swiperOptions || {}); } catch {}
+          if (forceRTL) el.setAttribute('dir', 'rtl');
+          if (el.swiper) {
+            try {
+              // Update measurements after images/CSS
+              el.swiper.update();
+              el.swiper.updateSize();
+              el.swiper.updateSlides();
+              el.swiper.slideTo(el.swiper.activeIndex, 0);
+            } catch {}
+          } else {
+            try {
+              // Minimal safe options to re-create if page didn't init itself
+              const opts = {
+                observer: true,
+                observeParents: true,
+                watchOverflow: true,
+                // Swiper handles RTL automatically from document/container dir
+              };
+              new Swiper(el, opts);
+            } catch {}
           }
         });
       }
+
       // Slick (jQuery)
       if (window.jQuery && jQuery.fn && jQuery.fn.slick) {
-        try { jQuery('.slick-slider:not(.slick-initialized)').slick(); } catch {}
+        jQuery('.slick-slider').each(function() {
+          const $el = jQuery(this);
+          try {
+            if ($el.hasClass('slick-initialized')) {
+              if (forceRTL) $el.slick('slickSetOption', 'rtl', true, true);
+              $el.slick('setPosition');
+            } else {
+              $el.slick({ rtl: !!forceRTL });
+            }
+          } catch {}
+        });
       }
-      // Nudge layouts
+
+      // Final nudge for any layout-driven carousel
       setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
     }
 
@@ -103,7 +159,8 @@
     (async function () {
       const params = new URLSearchParams(window.location.search);
       const uniqueId = params.get('unique_id');
-      const baseHref = params.get('base'); // optional: e.g., ?base=https://cdn.example.com/
+      const baseHref = params.get('base');   // optional: ?base=https://cdn.example.com/
+      const forceRTL = params.get('rtl') === '1' || params.get('force_rtl') === '1';
 
       if (!uniqueId) {
         document.getElementById("loader").innerText =
@@ -129,33 +186,33 @@
         const htmlCode = fromBase64Unicode(records[0].payload.file_content);
 
         // RTL / Hebrew hint
-        if (hasHebrew(htmlCode)) {
+        const contentLooksHebrew = hasHebrew(htmlCode);
+        if (forceRTL || contentLooksHebrew) {
           document.documentElement.setAttribute("lang", "he");
           document.documentElement.setAttribute("dir", "rtl");
         } else {
           document.documentElement.setAttribute("dir", "auto");
         }
 
-        // Parse the fetched HTML
+        // Parse fetched HTML
         const parser = new DOMParser();
         const doc = parser.parseFromString(htmlCode, "text/html");
 
-        // Optional <base> (helps resolve relative URLs)
+        // Optional <base> for resolving relative URLs
         if (baseHref) {
           const base = document.createElement('base');
           base.setAttribute('href', baseHref);
           document.head.appendChild(base);
         }
-        // If source doc has a <base>, copy it too
         const srcBase = doc.querySelector('base');
         if (srcBase && !document.querySelector('base')) {
           document.head.appendChild(srcBase.cloneNode(true));
         }
 
-        // 1) Inject non-script HEAD nodes first (meta, link, style, etc.)
+        // 1) Inject non-script HEAD nodes first
         const stylesheetPromises = [];
         for (const node of Array.from(doc.head.children)) {
-          if (node.tagName === 'SCRIPT') continue; // delay scripts
+          if (node.tagName === 'SCRIPT') continue;
           if (node.tagName === 'LINK' && (node.getAttribute('rel') || '').toLowerCase() === 'stylesheet') {
             const link = cloneElementWithAttributes(node);
             document.head.appendChild(link);
@@ -165,10 +222,9 @@
           }
         }
 
-        // 2) Prepare BODY nodes: inject everything except <script> for now
+        // 2) Prepare BODY nodes and collect scripts (preserve order)
         const bodyNodes = Array.from(doc.body.childNodes);
         const scripts = [];
-        // Collect HEAD scripts (preserve order)
         for (const node of Array.from(doc.head.children)) {
           if (node.tagName === 'SCRIPT') {
             scripts.push({
@@ -179,7 +235,6 @@
             });
           }
         }
-        // Collect BODY scripts (preserve order)
         for (const node of bodyNodes) {
           if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SCRIPT') {
             scripts.push({
@@ -191,7 +246,7 @@
           }
         }
 
-        // 3) Inject BODY content without scripts
+        // 3) Inject BODY content (without scripts yet)
         document.body.innerHTML = ""; // clear loader
         document.body.setAttribute("dir",
           doc.documentElement.getAttribute("dir") ||
@@ -202,17 +257,20 @@
           document.body.appendChild(node.cloneNode(true));
         }
 
-        // 4) Wait for stylesheets (max 10s)
+        // 4) Wait for CSS (max 10s), then wait for images (for size calc)
         await Promise.race([
           Promise.all(stylesheetPromises),
           new Promise(res => setTimeout(res, 10000))
         ]);
+        await waitForImages(document);
 
-        // 5) Execute scripts in order (head → body), after DOM exists
+        // 5) Execute scripts in order (head → body) after DOM exists
         await runScriptsSequentially(scripts);
 
-        // 6) Final pass: try to init common carousels if not auto-inited
-        tryInitCarousels();
+        // 6) Give the page a moment to attach its own initializers, then fix RTL + sizes
+        setTimeout(() => tryInitCarousels(forceRTL || contentLooksHebrew), 0);
+        // A second pass after fonts/images that load late
+        setTimeout(() => tryInitCarousels(forceRTL || contentLooksHebrew), 300);
 
       } catch (err) {
         document.getElementById("loader").innerText =
