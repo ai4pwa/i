@@ -5,149 +5,220 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
   <style>
-    /* Readable Hebrew by default */
     body { font-family: system-ui, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif; }
-    /* Better bidi handling for mixed RTL/LTR lines */
     [dir="auto"] { unicode-bidi: plaintext; }
     #loader { padding: 1rem; }
   </style>
 </head>
 <body dir="auto">
-  <div id="loader">Loading page… / טוען דף…</div>
+  <div id="loader">Loading page…</div>
 
   <script>
-    // --- UTF-8 safe Base64 decoder (handles Hebrew/Unicode) ---
+    // ---------- Helpers ----------
     function fromBase64Unicode(b64) {
       const bin = atob(b64);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      try {
-        return new TextDecoder('utf-8').decode(bytes);
-      } catch (_) {
-        // Fallback for very old browsers
-        return decodeURIComponent(escape(bin));
+      try { return new TextDecoder('utf-8').decode(bytes); }
+      catch { return decodeURIComponent(escape(bin)); }
+    }
+    function hasHebrew(str){ return /[\u0590-\u05FF]/.test(str); }
+
+    // Make late 'DOMContentLoaded' listeners fire immediately
+    (function patchDOMContentLoaded(){
+      const doc = document;
+      if (doc.readyState !== 'loading') {
+        const originalAdd = doc.addEventListener.bind(doc);
+        doc.addEventListener = function(type, listener, options) {
+          if (type === 'DOMContentLoaded') setTimeout(() => listener.call(doc), 0);
+          else originalAdd(type, listener, options);
+        };
+      }
+    })();
+
+    // Load a <link rel="stylesheet"> and return a promise
+    function loadStylesheet(linkEl) {
+      return new Promise(resolve => {
+        linkEl.addEventListener('load', resolve, { once: true });
+        linkEl.addEventListener('error', resolve, { once: true }); // don't block
+        // If it’s already loaded (some browsers), resolve next tick
+        setTimeout(resolve, 0);
+      });
+    }
+
+    function cloneElementWithAttributes(node) {
+      const clone = document.createElement(node.tagName);
+      for (const attr of node.attributes) clone.setAttribute(attr.name, attr.value);
+      return clone;
+    }
+
+    // Sequential script loader that preserves order
+    async function runScriptsSequentially(scriptDescriptors) {
+      for (const desc of scriptDescriptors) {
+        await new Promise(resolve => {
+          const s = document.createElement('script');
+          // copy all attributes (type, async, defer, crossorigin, integrity, nonce, etc.)
+          for (const attr of desc.attributes) s.setAttribute(attr.name, attr.value);
+          if (desc.src) {
+            s.onload = () => resolve();
+            s.onerror = () => resolve(); // don't block on failures
+            s.src = desc.src;
+            (desc.place === 'head' ? document.head : document.body).appendChild(s);
+          } else {
+            s.textContent = desc.code || '';
+            (desc.place === 'head' ? document.head : document.body).appendChild(s);
+            resolve();
+          }
+        });
       }
     }
 
-    // Simple heuristic: does the content include Hebrew letters?
-    function hasHebrew(str) {
-      return /[\u0590-\u05FF]/.test(str);
+    // Try to (re)initialize common carousels if libraries are present
+    function tryInitCarousels() {
+      // Bootstrap 4/5
+      if (window.bootstrap && bootstrap.Carousel) {
+        document.querySelectorAll('.carousel').forEach(el => {
+          if (!bootstrap.Carousel.getInstance(el)) {
+            try { new bootstrap.Carousel(el); } catch {}
+          }
+        });
+      }
+      // Swiper
+      if (window.Swiper) {
+        document.querySelectorAll('.swiper, .swiper-container').forEach(el => {
+          if (!el.__swiper) {
+            try { new Swiper(el, el.__swiperOptions || {}); } catch {}
+          }
+        });
+      }
+      // Slick (jQuery)
+      if (window.jQuery && jQuery.fn && jQuery.fn.slick) {
+        try { jQuery('.slick-slider:not(.slick-initialized)').slick(); } catch {}
+      }
+      // Nudge layouts
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
     }
 
-    const params = new URLSearchParams(window.location.search);
-    const htmlFile = params.get('unique_id');
+    // ---------- Main ----------
+    (async function () {
+      const params = new URLSearchParams(window.location.search);
+      const uniqueId = params.get('unique_id');
+      const baseHref = params.get('base'); // optional: e.g., ?base=https://cdn.example.com/
 
-    if (!htmlFile) {
-      document.getElementById("loader").innerText = "Error: No unique_id provided. / שגיאה: חסר unique_id.";
-    } else {
+      if (!uniqueId) {
+        document.getElementById("loader").innerText =
+          "Error: No unique_id provided.";
+        return;
+      }
+
       const apiUrl =
         "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
         "?user_id=user_jveo8b35q_1748241619184" +
-        "&payload.unique_id=" +
-        encodeURIComponent(htmlFile); // <-- safe for non-ASCII IDs
+        "&payload.unique_id=" + encodeURIComponent(uniqueId);
 
-      fetch(apiUrl, {
-        headers: {
-          api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
-          "Content-Type": "application/json",
-        },
-      })
-        .then(res => res.json())
-        .then(records => {
-          if (!records.length) throw new Error("HTML file not found.");
-
-          // Decode as UTF-8 (not plain atob) so Hebrew renders correctly
-          const base64Content = records[0].payload.file_content;
-          const htmlCode = fromBase64Unicode(base64Content);
-
-          // If the loaded document is primarily Hebrew, hint lang/dir
-          if (hasHebrew(htmlCode)) {
-            document.documentElement.setAttribute("lang", "he");
-            document.documentElement.setAttribute("dir", "rtl");
-          } else {
-            // Fall back to automatic direction handling
-            document.documentElement.setAttribute("dir", "auto");
-          }
-
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(htmlCode, "text/html");
-
-          // --- 1. Inject <head> nodes (preserve order) ---
-          for (let node of doc.head.children) {
-            if (node.tagName === "SCRIPT") {
-              const s = document.createElement("script");
-              if (node.src) s.src = node.src;
-              else s.textContent = node.textContent;
-              document.head.appendChild(s);
-            } else {
-              document.head.appendChild(node.cloneNode(true));
-            }
-          }
-
-          // --- 2. Save <body> for later ---
-          const bodyNodes = Array.from(doc.body.childNodes);
-
-          // --- 3. Function to inject body ---
-          const injectBody = () => {
-            document.body.innerHTML = ""; // clear loader
-            // Keep body bidi behavior
-            document.body.setAttribute("dir",
-              doc.documentElement.getAttribute("dir") ||
-              document.documentElement.getAttribute("dir") || "auto"
-            );
-            bodyNodes.forEach(node => {
-              if (node.tagName === "SCRIPT") {
-                const s = document.createElement("script");
-                if (node.src) s.src = node.src;
-                else s.textContent = node.textContent;
-                document.body.appendChild(s);
-              } else {
-                document.body.appendChild(node.cloneNode(true));
-              }
-            });
-          };
-
-          // --- 4. CSS detection ---
-          function cssSeemsLoaded() {
-            try {
-              for (const sheet of document.styleSheets) {
-                if (sheet.cssRules && sheet.cssRules.length > 0) {
-                  return true; // found stylesheet rules
-                }
-              }
-            } catch (e) {
-              // cross-origin stylesheet may throw → ignore
-            }
-            return false;
-          }
-
-          // --- 5. Poll until CSS loaded or fallback ---
-          let done = false;
-          const tryInject = () => {
-            if (!done) {
-              done = true;
-              injectBody();
-            }
-          };
-
-          const interval = setInterval(() => {
-            if (cssSeemsLoaded()) {
-              clearInterval(interval);
-              clearTimeout(fallback);
-              tryInject();
-            }
-          }, 100);
-
-          const fallback = setTimeout(() => {
-            clearInterval(interval);
-            tryInject();
-          }, 10000);
-        })
-        .catch(err => {
-          document.getElementById("loader").innerText =
-            `Error loading content: ${err} / שגיאה בטעינת התוכן: ${err}`;
+      try {
+        const res = await fetch(apiUrl, {
+          headers: {
+            api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
+            "Content-Type": "application/json",
+          },
         });
-    }
+        const records = await res.json();
+        if (!records.length) throw new Error("HTML file not found.");
+
+        const htmlCode = fromBase64Unicode(records[0].payload.file_content);
+
+        // RTL / Hebrew hint
+        if (hasHebrew(htmlCode)) {
+          document.documentElement.setAttribute("lang", "he");
+          document.documentElement.setAttribute("dir", "rtl");
+        } else {
+          document.documentElement.setAttribute("dir", "auto");
+        }
+
+        // Parse the fetched HTML
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlCode, "text/html");
+
+        // Optional <base> (helps resolve relative URLs)
+        if (baseHref) {
+          const base = document.createElement('base');
+          base.setAttribute('href', baseHref);
+          document.head.appendChild(base);
+        }
+        // If source doc has a <base>, copy it too
+        const srcBase = doc.querySelector('base');
+        if (srcBase && !document.querySelector('base')) {
+          document.head.appendChild(srcBase.cloneNode(true));
+        }
+
+        // 1) Inject non-script HEAD nodes first (meta, link, style, etc.)
+        const stylesheetPromises = [];
+        for (const node of Array.from(doc.head.children)) {
+          if (node.tagName === 'SCRIPT') continue; // delay scripts
+          if (node.tagName === 'LINK' && (node.getAttribute('rel') || '').toLowerCase() === 'stylesheet') {
+            const link = cloneElementWithAttributes(node);
+            document.head.appendChild(link);
+            stylesheetPromises.push(loadStylesheet(link));
+          } else {
+            document.head.appendChild(node.cloneNode(true));
+          }
+        }
+
+        // 2) Prepare BODY nodes: inject everything except <script> for now
+        const bodyNodes = Array.from(doc.body.childNodes);
+        const scripts = [];
+        // Collect HEAD scripts (preserve order)
+        for (const node of Array.from(doc.head.children)) {
+          if (node.tagName === 'SCRIPT') {
+            scripts.push({
+              place: 'head',
+              src: node.src || '',
+              code: node.src ? '' : node.textContent,
+              attributes: Array.from(node.attributes)
+            });
+          }
+        }
+        // Collect BODY scripts (preserve order)
+        for (const node of bodyNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SCRIPT') {
+            scripts.push({
+              place: 'body',
+              src: node.src || '',
+              code: node.src ? '' : node.textContent,
+              attributes: Array.from(node.attributes)
+            });
+          }
+        }
+
+        // 3) Inject BODY content without scripts
+        document.body.innerHTML = ""; // clear loader
+        document.body.setAttribute("dir",
+          doc.documentElement.getAttribute("dir") ||
+          document.documentElement.getAttribute("dir") || "auto"
+        );
+        for (const node of bodyNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SCRIPT') continue;
+          document.body.appendChild(node.cloneNode(true));
+        }
+
+        // 4) Wait for stylesheets (max 10s)
+        await Promise.race([
+          Promise.all(stylesheetPromises),
+          new Promise(res => setTimeout(res, 10000))
+        ]);
+
+        // 5) Execute scripts in order (head → body), after DOM exists
+        await runScriptsSequentially(scripts);
+
+        // 6) Final pass: try to init common carousels if not auto-inited
+        tryInitCarousels();
+
+      } catch (err) {
+        document.getElementById("loader").innerText =
+          `Error loading content: ${err}`;
+      }
+    })();
   </script>
 </body>
 </html>
