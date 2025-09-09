@@ -1,19 +1,31 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="he"> <!-- use "he" for Hebrew or keep "en" if mixed -->
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
 </head>
-<body>
+<body dir="auto">  <!-- let browser pick RTL/LTR automatically -->
   <div id="loader">Loading page...</div>
 
   <script>
+    // --- UTF-8 safe base64 decoder ---
+    function fromBase64Unicode(b64) {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      try {
+        return new TextDecoder('utf-8').decode(bytes);
+      } catch (_) {
+        return decodeURIComponent(escape(bin));
+      }
+    }
+
     const params = new URLSearchParams(window.location.search);
     const htmlFile = params.get('unique_id');
 
     if (!htmlFile) {
-      document.getElementById("loader").innerText = "Error: No unique_id provided.";
+      document.getElementById("loader").innerText = "שגיאה: חסר unique_id.";
     } else {
       const apiUrl =
         "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
@@ -31,7 +43,7 @@
         .then(records => {
           if (!records.length) throw new Error("HTML file not found.");
           const base64Content = records[0].payload.file_content;
-          const htmlCode = atob(base64Content);
+          const htmlCode = fromBase64Unicode(base64Content); // UTF-8 decode
 
           const parser = new DOMParser();
           const doc = parser.parseFromString(htmlCode, "text/html");
@@ -61,7 +73,9 @@
                 else s.textContent = node.textContent;
                 document.body.appendChild(s);
               } else {
-                document.body.appendChild(node.cloneNode(true));
+                const clone = node.cloneNode(true);
+                if (clone.nodeType === 1) clone.setAttribute('dir','auto'); // auto RTL/LTR
+                document.body.appendChild(clone);
               }
             });
           };
@@ -103,7 +117,7 @@
           }, 10000);
         })
         .catch(err => {
-          document.getElementById("loader").innerText = `Error loading content: ${err}`;
+          document.getElementById("loader").innerText = `שגיאה בטעינת התוכן: ${err}`;
         });
     }
   </script>
