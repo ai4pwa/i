@@ -3,381 +3,109 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HTML Loader (RTL + Carousel Safe)</title>
-  <style>
-    body { font-family: system-ui, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif; }
-    [dir="auto"] { unicode-bidi: plaintext; }
-    #loader { padding: 1rem; }
-
-    /* -------- RTL FIXES (broad) -------- */
-    html[dir="rtl"] .rtl-only { direction: rtl; }
-    html[dir="rtl"] .ltr-only { direction: ltr; }
-
-    /* Swiper: make sure container picks up RTL */
-    html[dir="rtl"] .swiper, html[dir="rtl"] .swiper-container { direction: rtl; }
-
-    /* Slick: make sure slider uses RTL flow */
-    html[dir="rtl"] .slick-slider { direction: rtl; }
-    html[dir="rtl"] .slick-track { right: 0; left: auto; }
-
-    /* Bootstrap 5: override transforms for RTL (if CSS build is LTR) */
-    html[dir="rtl"] .carousel .carousel-item-next:not(.carousel-item-start),
-    html[dir="rtl"] .carousel .active.carousel-item-end {
-      transform: translateX(-100%) !important;
-    }
-    html[dir="rtl"] .carousel .carousel-item-prev:not(.carousel-item-end),
-    html[dir="rtl"] .carousel .active.carousel-item-start {
-      transform: translateX(100%) !important;
-    }
-    html[dir="rtl"] .carousel .carousel-control-prev { right: 0; left: auto; }
-    html[dir="rtl"] .carousel .carousel-control-next { left: 0; right: auto; }
-
-    /* Bootstrap 4: legacy classnames */
-    html[dir="rtl"] .carousel .carousel-item-next.carousel-item-left,
-    html[dir="rtl"] .carousel .carousel-item-prev.carousel-item-right {
-      transform: translateX(-100%) !important;
-      left: auto !important;
-      right: 0 !important;
-    }
-    html[dir="rtl"] .carousel .active.carousel-item-left {
-      transform: translateX(100%) !important;
-      left: auto !important;
-      right: 0 !important;
-    }
-    html[dir="rtl"] .carousel .active.carousel-item-right {
-      transform: translateX(-100%) !important;
-      left: auto !important;
-      right: 0 !important;
-    }
-
-    /* Defensive: avoid disappearing slides due to backface issues */
-    .carousel-item, .slick-slide, .swiper-slide {
-      backface-visibility: hidden;
-      transform-style: preserve-3d;
-    }
-  </style>
+  <title>HTML Loader</title>
 </head>
-<body dir="auto">
-  <div id="loader">Loading page… / טוען דף…</div>
+<body>
+  <div id="loader">Loading page...</div>
 
   <script>
-    (function(){
-      const params = new URLSearchParams(location.search);
-      const DEBUG = params.get('debug') === '1';
-      const uniqueId = params.get('unique_id');
-      const baseHref = params.get('base');           // optional: ?base=https://cdn.example.com/
-      const forceRTL = params.get('rtl') === '1' || params.get('force_rtl') === '1';
-      const carouselHint = (params.get('carousel') || '').toLowerCase(); // 'bootstrap' | 'swiper' | 'slick' | ''
+    const params = new URLSearchParams(window.location.search);
+    const htmlFile = params.get('unique_id');
 
-      const log = (...a) => { if (DEBUG) console.log('[lh]', ...a); };
+    if (!htmlFile) {
+      document.getElementById("loader").innerText = "Error: No unique_id provided.";
+    } else {
+      const apiUrl =
+        "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
+        "?user_id=user_jveo8b35q_1748241619184" +
+        "&payload.unique_id=" +
+        htmlFile;
 
-      if (!uniqueId) {
-        document.getElementById("loader").innerText = "Error: No unique_id provided. / שגיאה: חסר unique_id.";
-        return;
-      }
+      fetch(apiUrl, {
+        headers: {
+          api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
+          "Content-Type": "application/json",
+        },
+      })
+        .then(res => res.json())
+        .then(records => {
+          if (!records.length) throw new Error("HTML file not found.");
+          const base64Content = records[0].payload.file_content;
+          const htmlCode = atob(base64Content);
 
-      function fromBase64Unicode(b64) {
-        const bin = atob(b64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        try { return new TextDecoder('utf-8').decode(bytes); }
-        catch { return decodeURIComponent(escape(bin)); }
-      }
-      function hasHebrew(str){ return /[\\u0590-\\u05FF]/.test(str); }
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(htmlCode, "text/html");
 
-      // Patch DOMContentLoaded so late listeners still execute
-      (function patchDOMContentLoaded(){
-        const doc = document;
-        if (doc.readyState !== 'loading') {
-          const originalAdd = doc.addEventListener.bind(doc);
-          doc.addEventListener = function(type, listener, options) {
-            if (type === 'DOMContentLoaded') setTimeout(() => listener.call(doc), 0);
-            else originalAdd(type, listener, options);
-          };
-          log('Patched DOMContentLoaded');
-        }
-      })();
-
-      function cloneElementWithAttributes(node) {
-        const clone = document.createElement(node.tagName);
-        for (const attr of node.attributes) clone.setAttribute(attr.name, attr.value);
-        return clone;
-      }
-      function loadStylesheet(linkEl) {
-        return new Promise(resolve => {
-          linkEl.addEventListener('load', resolve, { once: true });
-          linkEl.addEventListener('error', resolve, { once: true });
-          // Resolve on next tick regardless to avoid hard block
-          setTimeout(resolve, 0);
-        });
-      }
-      function waitForImages(root) {
-        const imgs = Array.from((root || document).images).filter(img => !img.complete);
-        if (!imgs.length) return Promise.resolve();
-        return Promise.all(imgs.map(img => new Promise(res => {
-          img.addEventListener('load', res, { once: true });
-          img.addEventListener('error', res, { once: true });
-        })));
-      }
-      async function runScriptsSequentially(scriptDescriptors) {
-        for (const desc of scriptDescriptors) {
-          await new Promise(resolve => {
-            const s = document.createElement('script');
-            // copy attributes
-            for (const attr of desc.attributes) s.setAttribute(attr.name, attr.value);
-            // ensure async=false
-            s.async = false;
-            if (desc.src) {
-              s.onload = () => { log('loaded script', desc.src); resolve(); };
-              s.onerror = () => { log('error script', desc.src); resolve(); };
-              s.src = desc.src;
-              (desc.place === 'head' ? document.head : document.body).appendChild(s);
+          // --- 1. Inject <head> ---
+          for (let node of doc.head.children) {
+            if (node.tagName === "SCRIPT") {
+              const s = document.createElement("script");
+              if (node.src) s.src = node.src;
+              else s.textContent = node.textContent;
+              document.head.appendChild(s);
             } else {
-              s.textContent = desc.code || '';
-              (desc.place === 'head' ? document.head : document.body).appendChild(s);
-              resolve();
+              document.head.appendChild(node.cloneNode(true));
             }
-          });
-        }
-      }
+          }
 
-      // Monkey-patches to enforce RTL on popular libs when needed
-      function patchLibrariesForRTL(forceRTLNow) {
-        // Slick (jQuery)
-        if (window.jQuery && jQuery.fn && jQuery.fn.slick && !jQuery.fn.__slickRTLPatched) {
-          const orig = jQuery.fn.slick;
-          jQuery.fn.slick = function() {
-            if (document.documentElement.dir === 'rtl' || forceRTLNow) {
-              if (!arguments.length || typeof arguments[0] === 'object') {
-                const opts = arguments[0] || {};
-                if (opts.rtl === undefined) opts.rtl = true;
-                return orig.call(this, opts);
-              }
-              if (arguments[0] === 'slickSetOption' && arguments[1] === 'rtl') {
-                arguments[2] = true;
-              }
-            }
-            return orig.apply(this, arguments);
-          };
-          jQuery.fn.__slickRTLPatched = true;
-          log('Patched Slick for RTL');
-        }
+          // --- 2. Save <body> for later ---
+          const bodyNodes = Array.from(doc.body.childNodes);
 
-        // Swiper: wrap constructor to enforce RTL props if needed
-        if (window.Swiper && !window.__SwiperRTLPatch) {
-          try {
-            const OrigSwiper = window.Swiper;
-            window.Swiper = function(el, opts) {
-              const dirIsRTL = document.documentElement.dir === 'rtl' || forceRTLNow;
-              const options = Object.assign({
-                observer: true,
-                observeParents: true,
-                watchOverflow: true
-              }, opts || {});
-              const inst = new OrigSwiper(el, options);
-              try {
-                if (dirIsRTL) {
-                  if (typeof inst.changeLanguageDirection === 'function') {
-                    inst.changeLanguageDirection('rtl');
-                  } else {
-                    if (el && el.setAttribute) el.setAttribute('dir', 'rtl');
-                    inst.rtlTranslate = true;
-                  }
-                  inst.updateSize();
-                  inst.updateSlides();
-                  inst.update();
-                }
-              } catch (e) { /* ignore */ }
-              return inst;
-            };
-            Object.setPrototypeOf(window.Swiper, OrigSwiper);
-            window.Swiper.prototype = OrigSwiper.prototype;
-            window.__SwiperRTLPatch = true;
-            log('Patched Swiper for RTL');
-          } catch (e) { /* ignore */ }
-        }
-      }
-
-      function tryInitCarousels(forceRTLNow) {
-        // Bootstrap Carousel
-        if (window.bootstrap && bootstrap.Carousel) {
-          document.querySelectorAll('.carousel').forEach(el => {
-            // For BS LTR builds inside RTL page, force the container LTR so transforms match
-            if ((document.documentElement.dir === 'rtl' || forceRTLNow) && !el.hasAttribute('data-keep-dir')) {
-              el.setAttribute('dir', 'ltr'); // Only the carousel container; inner text can be auto
-              el.querySelectorAll('.carousel-item, .carousel-caption').forEach(n => n.setAttribute('dir', 'auto'));
-            }
-            const inst = bootstrap.Carousel.getInstance(el) || new bootstrap.Carousel(el, {});
-            try { inst.pause(); inst.cycle(); } catch {}
-          });
-          log('Bootstrap carousels initialized');
-        }
-
-        // Swiper
-        if (window.Swiper) {
-          document.querySelectorAll('.swiper, .swiper-container').forEach(el => {
-            if (forceRTLNow || document.documentElement.dir === 'rtl') el.setAttribute('dir', 'rtl');
-            if (el.swiper) {
-              try {
-                if (typeof el.swiper.changeLanguageDirection === 'function') {
-                  el.swiper.changeLanguageDirection('rtl');
-                }
-                el.swiper.updateSize();
-                el.swiper.updateSlides();
-                el.swiper.update();
-                el.swiper.slideTo(el.swiper.activeIndex, 0);
-              } catch {}
-            } else {
-              try { new Swiper(el, { observer:true, observeParents:true, watchOverflow:true }); } catch {}
-            }
-          });
-          log('Swiper initialized/updated');
-        }
-
-        // Slick
-        if (window.jQuery && jQuery.fn && jQuery.fn.slick) {
-          jQuery('.slick-slider').each(function() {
-            const $el = jQuery(this);
-            try {
-              if ($el.hasClass('slick-initialized')) {
-                if (forceRTLNow || document.documentElement.dir === 'rtl') {
-                  $el.slick('slickSetOption', 'rtl', true, true);
-                }
-                $el.slick('setPosition');
+          // --- 3. Function to inject body ---
+          const injectBody = () => {
+            document.body.innerHTML = ""; // clear loader
+            bodyNodes.forEach(node => {
+              if (node.tagName === "SCRIPT") {
+                const s = document.createElement("script");
+                if (node.src) s.src = node.src;
+                else s.textContent = node.textContent;
+                document.body.appendChild(s);
               } else {
-                $el.slick({ rtl: (forceRTLNow || document.documentElement.dir === 'rtl') });
+                document.body.appendChild(node.cloneNode(true));
               }
-            } catch {}
-          });
-          log('Slick initialized/updated');
-        }
+            });
+          };
 
-        setTimeout(() => window.dispatchEvent(new Event('resize')), 30);
-        setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
-      }
+          // --- 4. CSS detection ---
+          function cssSeemsLoaded() {
+            try {
+              for (const sheet of document.styleSheets) {
+                if (sheet.cssRules && sheet.cssRules.length > 0) {
+                  return true; // found stylesheet rules
+                }
+              }
+            } catch (e) {
+              // cross-origin stylesheet may throw → ignore
+            }
+            return false;
+          }
 
-      // Observe visibility to re-measure when carousels become visible
-      function watchVisibilityAndUpdate() {
-        const update = () => tryInitCarousels(forceRTL);
-        const io = new IntersectionObserver((entries) => {
-          entries.forEach(e => { if (e.isIntersecting) setTimeout(update, 0); });
-        }, { root: null, threshold: 0.01 });
-        document.querySelectorAll('.carousel, .swiper, .swiper-container, .slick-slider').forEach(el => io.observe(el));
-        document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(update, 0); });
-      }
+          // --- 5. Poll until CSS loaded or fallback ---
+          let done = false;
+          const tryInject = () => {
+            if (!done) {
+              done = true;
+              injectBody();
+            }
+          };
 
-      async function main() {
-        const apiUrl =
-          "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
-          "?user_id=user_jveo8b35q_1748241619184" +
-          "&payload.unique_id=" + encodeURIComponent(uniqueId);
+          const interval = setInterval(() => {
+            if (cssSeemsLoaded()) {
+              clearInterval(interval);
+              clearTimeout(fallback);
+              tryInject();
+            }
+          }, 100);
 
-        log('Fetching', apiUrl);
-        const res = await fetch(apiUrl, {
-          headers: {
-            api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
-            "Content-Type": "application/json",
-          },
+          const fallback = setTimeout(() => {
+            clearInterval(interval);
+            tryInject();
+          }, 10000);
+        })
+        .catch(err => {
+          document.getElementById("loader").innerText = `Error loading content: ${err}`;
         });
-        const records = await res.json();
-        if (!records.length) throw new Error("HTML file not found.");
-
-        const htmlCode = fromBase64Unicode(records[0].payload.file_content);
-        const contentLooksHebrew = hasHebrew(htmlCode);
-
-        // Set language/dir
-        if (forceRTL || contentLooksHebrew) {
-          document.documentElement.setAttribute("lang", "he");
-          document.documentElement.setAttribute("dir", "rtl");
-        } else {
-          document.documentElement.setAttribute("dir", "auto");
-        }
-
-        // Parse fetched HTML
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(htmlCode, "text/html");
-
-        // <base> handling
-        if (baseHref) {
-          const base = document.createElement('base');
-          base.setAttribute('href', baseHref);
-          document.head.appendChild(base);
-          log('Injected base', baseHref);
-        }
-        const srcBase = doc.querySelector('base');
-        if (srcBase && !document.querySelector('base')) {
-          document.head.appendChild(srcBase.cloneNode(true));
-          log('Cloned base from source');
-        }
-
-        // 1) Inject non-script HEAD nodes first
-        const stylesheetPromises = [];
-        for (const node of Array.from(doc.head.children)) {
-          if (node.tagName === 'SCRIPT') continue;
-          if (node.tagName === 'LINK' && (node.getAttribute('rel') || '').toLowerCase() === 'stylesheet') {
-            const link = cloneElementWithAttributes(node);
-            document.head.appendChild(link);
-            stylesheetPromises.push(loadStylesheet(link));
-          } else {
-            document.head.appendChild(node.cloneNode(true));
-          }
-        }
-
-        // 2) Collect scripts in order
-        const scripts = [];
-        for (const node of Array.from(doc.head.children)) {
-          if (node.tagName === 'SCRIPT') {
-            scripts.push({ place: 'head', src: node.src || '', code: node.src ? '' : node.textContent, attributes: Array.from(node.attributes) });
-          }
-        }
-        const bodyNodes = Array.from(doc.body.childNodes);
-        for (const node of bodyNodes) {
-          if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SCRIPT') {
-            scripts.push({ place: 'body', src: node.src || '', code: node.src ? '' : node.textContent, attributes: Array.from(node.attributes) });
-          }
-        }
-
-        // 3) Inject BODY content without scripts
-        document.body.innerHTML = ""; // clear loader
-        document.body.setAttribute("dir",
-          doc.documentElement.getAttribute("dir") ||
-          document.documentElement.getAttribute("dir") || "auto"
-        );
-        for (const node of bodyNodes) {
-          if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SCRIPT') continue;
-          document.body.appendChild(node.cloneNode(true));
-        }
-
-        // 4) Wait for CSS (max 12s) and images
-        await Promise.race([ Promise.all(stylesheetPromises), new Promise(res => setTimeout(res, 12000)) ]);
-        await waitForImages(document);
-
-        // 5) Patch libs for RTL if needed before running scripts
-        if (forceRTL || contentLooksHebrew) patchLibrariesForRTL(true);
-
-        // 6) Run scripts in order
-        await runScriptsSequentially(scripts);
-
-        // 7) Finalize: hint library if provided
-        if (carouselHint) log('Carousel hint:', carouselHint);
-
-        // 8) Try init/update carousels now and after a short delay
-        tryInitCarousels(forceRTL || contentLooksHebrew);
-        setTimeout(() => tryInitCarousels(forceRTL || contentLooksHebrew), 250);
-        setTimeout(() => tryInitCarousels(forceRTL || contentLooksHebrew), 800);
-
-        // 9) Watch visibility (for tabbed/hidden carousels)
-        watchVisibilityAndUpdate();
-
-        log('Done');
-      }
-
-      main().catch(err => {
-        console.error(err);
-        document.getElementById("loader").innerText =
-          `Error loading content: ${err} / שגיאה בטעינת התוכן: ${err}`;
-      });
-    })();
+    }
   </script>
 </body>
 </html>
