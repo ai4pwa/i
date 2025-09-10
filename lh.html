@@ -9,6 +9,7 @@
   <div id="loader">Loading page...</div>
 
   <script>
+    // --- UTF-8 safe base64 decoder ---
     function fromBase64Unicode(b64) {
       const bin = atob(b64);
       const bytes = new Uint8Array(bin.length);
@@ -48,11 +49,21 @@
           const doc = parser.parseFromString(htmlCode, "text/html");
 
           // --- set current document's dir/lang based on loaded doc ---
+          // copy lang if present
           if (doc.documentElement.lang) {
             document.documentElement.lang = doc.documentElement.lang;
           }
-          if (doc.documentElement.dir) {
-            document.documentElement.dir = doc.documentElement.dir;
+
+          // check dir on <html> first, then <body>
+          const htmlDir = doc.documentElement.getAttribute('dir');
+          const bodyDir = doc.body ? doc.body.getAttribute('dir') : null;
+
+          if (htmlDir) {
+            document.documentElement.setAttribute('dir', htmlDir);
+          } else if (bodyDir) {
+            document.documentElement.setAttribute('dir', bodyDir);
+          } else {
+            // if neither present, leave whatever the loader already has
           }
 
           // --- inject <head> ---
