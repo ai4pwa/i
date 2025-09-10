@@ -9,6 +9,17 @@
   <div id="loader">Loading page...</div>
 
   <script>
+    function fromBase64Unicode(b64) {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      try {
+        return new TextDecoder('utf-8').decode(bytes);
+      } catch (_) {
+        return decodeURIComponent(escape(bin));
+      }
+    }
+
     const params = new URLSearchParams(window.location.search);
     const htmlFile = params.get('unique_id');
 
@@ -31,12 +42,20 @@
         .then(records => {
           if (!records.length) throw new Error("HTML file not found.");
           const base64Content = records[0].payload.file_content;
-          const htmlCode = atob(base64Content);
+          const htmlCode = fromBase64Unicode(base64Content);
 
           const parser = new DOMParser();
           const doc = parser.parseFromString(htmlCode, "text/html");
 
-          // --- 1. Inject <head> ---
+          // --- set current document's dir/lang based on loaded doc ---
+          if (doc.documentElement.lang) {
+            document.documentElement.lang = doc.documentElement.lang;
+          }
+          if (doc.documentElement.dir) {
+            document.documentElement.dir = doc.documentElement.dir;
+          }
+
+          // --- inject <head> ---
           for (let node of doc.head.children) {
             if (node.tagName === "SCRIPT") {
               const s = document.createElement("script");
@@ -48,10 +67,10 @@
             }
           }
 
-          // --- 2. Save <body> for later ---
+          // --- save <body> for later ---
           const bodyNodes = Array.from(doc.body.childNodes);
 
-          // --- 3. Function to inject body ---
+          // --- function to inject body ---
           const injectBody = () => {
             document.body.innerHTML = ""; // clear loader
             bodyNodes.forEach(node => {
@@ -66,21 +85,18 @@
             });
           };
 
-          // --- 4. CSS detection ---
+          // --- wait for CSS then inject ---
           function cssSeemsLoaded() {
             try {
               for (const sheet of document.styleSheets) {
                 if (sheet.cssRules && sheet.cssRules.length > 0) {
-                  return true; // found stylesheet rules
+                  return true;
                 }
               }
-            } catch (e) {
-              // cross-origin stylesheet may throw → ignore
-            }
+            } catch (e) {}
             return false;
           }
 
-          // --- 5. Poll until CSS loaded or fallback ---
           let done = false;
           const tryInject = () => {
             if (!done) {
