@@ -1,193 +1,43 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HTML Loader</title>
 </head>
 <body>
   <div id="loader">Loading page...</div>
 
 <script>
-  // --- UTF-8 safe base64 decoder ---
   function fromBase64Unicode(b64) {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    try {
-      return new TextDecoder('utf-8').decode(bytes);
-    } catch (_) {
-      return decodeURIComponent(escape(bin));
-    }
-  }
-
-  // Helper: fetch a Base44 record by unique_id and return decoded content (or null)
-  async function fetchBase44ByUniqueId(uniqueId) {
-    const apiUrl = "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord"
-      + "?user_id=user_jveo8b35q_1748241619184"
-      + "&payload.unique_id=" + encodeURIComponent(uniqueId);
-
-    try {
-      const res = await fetch(apiUrl, {
-        headers: {
-          api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
-          "Content-Type": "application/json",
-        },
-      });
-      const records = await res.json();
-      if (!records || !records.length) return null;
-      const base64Content = records[0].payload.file_content;
-      return fromBase64Unicode(base64Content);
-    } catch (err) {
-      console.error('fetchBase44ByUniqueId failed', uniqueId, err);
-      return null;
-    }
+    try { return new TextDecoder('utf-8').decode(bytes); } catch (_) { return decodeURIComponent(escape(bin)); }
   }
 
   const params = new URLSearchParams(window.location.search);
   const htmlFile = params.get('unique_id');
   if (!htmlFile) {
-    document.getElementById("loader").innerText = "Error: No unique_id provided.";
+    document.getElementById('loader').innerText = 'Error: No unique_id provided.';
   } else {
     const apiUrl =
-      "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
-      "?user_id=user_jveo8b35q_1748241619184" +
-      "&payload.unique_id=" +
-      htmlFile;
+      'https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord' +
+      '?user_id=user_jveo8b35q_1748241619184' +
+      '&payload.unique_id=' + encodeURIComponent(htmlFile);
 
     fetch(apiUrl, {
-      headers: {
-        api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
-        "Content-Type": "application/json",
-      },
+      headers: { api_key: '69315aa5aa7f4b6fa99c7a420da68bdd', 'Content-Type': 'application/json' }
     })
-      .then(res => res.json())
-      .then(async records => {
-        if (!records.length) throw new Error("HTML file not found.");
+      .then(r => r.json())
+      .then(records => {
+        if (!records || !records.length) throw new Error('HTML not found.');
         const htmlCode = fromBase64Unicode(records[0].payload.file_content);
-
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(htmlCode, "text/html");
-
-        // --- copy lang/dir as before ---
-        if (doc.documentElement.lang) document.documentElement.lang = doc.documentElement.lang;
-        const htmlDir = doc.documentElement.getAttribute('dir');
-        const bodyDir = doc.body ? doc.body.getAttribute('dir') : null;
-        if (htmlDir) document.documentElement.setAttribute('dir', htmlDir);
-        else if (bodyDir) document.documentElement.setAttribute('dir', bodyDir);
-
-        // Separate head nodes into: non-script nodes, css-wrapper scripts, js-wrapper scripts, inline scripts
-        const headChildren = doc.head ? Array.from(doc.head.children) : [];
-        const headNonScripts = [];
-        const headCssWrappers = []; // scripts that wrap CSS: /i/lc.js?unique_id=...
-        const headJsWrappers = [];  // scripts that are normal JS wrappers (/i/l.js?...)
-        const headInlineScripts = [];
-
-        for (const node of headChildren) {
-          if (node.tagName !== 'SCRIPT') {
-            headNonScripts.push(node);
-          } else {
-            const src = node.src || '';
-            if (/\/i\/lc\.js\b/.test(src) && /\bunique_id=/.test(src)) {
-              // likely CSS wrapper - extract unique_id
-              const u = new URL(src, window.location.href).searchParams.get('unique_id');
-              headCssWrappers.push({ original: node, uniqueId: u });
-            } else if (src) {
-              headJsWrappers.push(node);
-            } else {
-              headInlineScripts.push(node);
-            }
-          }
-        }
-
-        // BODY nodes split similarly
-        const bodyChildren = doc.body ? Array.from(doc.body.childNodes) : [];
-        const bodyNonScripts = [];
-        const bodyScriptNodes = [];
-        for (const node of bodyChildren) {
-          if (node.tagName === 'SCRIPT') bodyScriptNodes.push(node);
-          else bodyNonScripts.push(node);
-        }
-
-        // Append head non-scripts first (meta, base, link placeholders if any)
-        for (const node of headNonScripts) {
-          try { document.head.appendChild(document.importNode(node, true)); } catch (_) { document.head.appendChild(node.cloneNode(true)); }
-        }
-
-        // For any CSS wrapper scripts, fetch the underlying CSS and inject as <style> inline
-        for (const w of headCssWrappers) {
-          if (!w.uniqueId) continue;
-          const cssText = await fetchBase44ByUniqueId(w.uniqueId);
-          if (cssText !== null) {
-            const styleEl = document.createElement('style');
-            styleEl.setAttribute('data-from-wrapper', w.uniqueId);
-            styleEl.textContent = cssText;
-            document.head.appendChild(styleEl);
-          } else {
-            // fallback: append the wrapper script for best-effort (rare)
-            const imported = document.importNode(w.original, true);
-            document.head.appendChild(imported);
-          }
-        }
-
-        // If there are JS wrapper scripts that are essential, keep them to run later (as "external scripts")
-        const scriptsToRunHead = [];
-        for (const node of headJsWrappers) scriptsToRunHead.push(node);
-
-        // Save body nodes (non-scripts) and append them (don't overwrite full body)
-        const loaderEl = document.getElementById('loader');
-        if (loaderEl) loaderEl.remove();
-
-        for (const node of bodyNonScripts) {
-          try { document.body.appendChild(document.importNode(node, true)); } catch (_) { document.body.appendChild(node.cloneNode(true)); }
-        }
-
-        // Utility: Append scripts sequentially and preserve attributes. Wait for external script loads before next.
-        async function appendScriptsSequentially(nodes, parent) {
-          for (const node of nodes) {
-            const s = document.createElement('script');
-            if (node.attributes) {
-              for (let i = 0; i < node.attributes.length; i++) {
-                const attr = node.attributes[i];
-                try { s.setAttribute(attr.name, attr.value); } catch (_) {}
-              }
-            }
-
-            if (!node.src) {
-              s.textContent = node.textContent || '';
-              parent.appendChild(s);
-              // allow browser to parse inline script
-              await new Promise(r => setTimeout(r, 0));
-            } else {
-              s.src = node.src;
-              // preserve module vs nomodule behavior
-              const isModule = node.getAttribute && node.getAttribute('type') === 'module';
-              if (!isModule) s.async = false; // try to preserve order for non-module scripts
-              await new Promise(res => {
-                s.onload = () => res();
-                s.onerror = () => res(); // don't hang if a script fails
-                parent.appendChild(s);
-              });
-            }
-          }
-        }
-
-        // Now append head scripts (external and inline), then body scripts — in order.
-        // We run head scripts first (which many pages rely on), then body scripts.
-        (async () => {
-          try {
-            // head external + inline
-            await appendScriptsSequentially(scriptsToRunHead.concat(headInlineScripts.map(n => n)), document.head);
-            // body scripts
-            await appendScriptsSequentially(bodyScriptNodes, document.body);
-          } catch (e) {
-            console.error('Error injecting scripts', e);
-          }
-        })();
-
+        // Replace whole document — same as i.html approach
+        document.open();
+        document.write(htmlCode);
+        document.close();
       })
       .catch(err => {
-        document.getElementById("loader").innerText = `Error loading content: ${err}`;
+        document.getElementById('loader').innerText = `Error loading content: ${err.message || err}`;
         console.error(err);
       });
   }
