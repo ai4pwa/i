@@ -83,12 +83,22 @@
 
           // --- function to inject body ---
           const injectBody = () => {
-            document.body.innerHTML = ""; // clear loader
+            // remove the loader element only — do NOT nuke the whole body.
+            const loaderEl = document.getElementById('loader');
+            if (loaderEl) loaderEl.remove();
+          
+            // append clones of the fetched body nodes (preserves existing page context)
             bodyNodes.forEach(node => {
               if (node.tagName === "SCRIPT") {
                 const s = document.createElement("script");
-                if (node.src) s.src = node.src;
-                else s.textContent = node.textContent;
+                // preserve async/defer if present in original
+                if (node.src) {
+                  s.src = node.src;
+                  if (node.async) s.async = true;
+                  if (node.defer) s.defer = true;
+                } else {
+                  s.textContent = node.textContent;
+                }
                 document.body.appendChild(s);
               } else {
                 document.body.appendChild(node.cloneNode(true));
@@ -99,13 +109,28 @@
           // --- wait for CSS then inject ---
           function cssSeemsLoaded() {
             try {
+              // If we have any <style> tags in head, assume ok:
+              if (document.head.querySelectorAll('style').length > 0) return true;
+          
+              // If there are link rel=stylesheet tags, assume they will load. Try a heuristic:
+              const links = Array.from(document.head.querySelectorAll('link[rel="stylesheet"]'));
+              if (links.length === 0) return false;
+          
+              // If any stylesheet is accessible and has rules, we are definitely loaded.
               for (const sheet of document.styleSheets) {
-                if (sheet.cssRules && sheet.cssRules.length > 0) {
+                try {
+                  if (sheet.cssRules && sheet.cssRules.length > 0) return true;
+                } catch (e) {
+                  // cross-origin stylesheet -> assume it's loaded (can't inspect cssRules)
                   return true;
                 }
               }
-            } catch (e) {}
-            return false;
+          
+              // fallback: if we found link tags but couldn't inspect them, assume loaded
+              return true;
+            } catch (e) {
+              return false;
+            }
           }
 
           let done = false;
