@@ -9,7 +9,7 @@
   <div id="loader">Loading page...</div>
 
 <script>
-  // --- UTF-8 safe base64 decoder (unchanged) ---
+  // --- UTF-8 safe base64 decoder ---
   function fromBase64Unicode(b64) {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
@@ -21,9 +21,31 @@
     }
   }
 
+  // Helper: fetch a Base44 record by unique_id and return decoded content (or null)
+  async function fetchBase44ByUniqueId(uniqueId) {
+    const apiUrl = "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord"
+      + "?user_id=user_jveo8b35q_1748241619184"
+      + "&payload.unique_id=" + encodeURIComponent(uniqueId);
+
+    try {
+      const res = await fetch(apiUrl, {
+        headers: {
+          api_key: "69315aa5aa7f4b6fa99c7a420da68bdd",
+          "Content-Type": "application/json",
+        },
+      });
+      const records = await res.json();
+      if (!records || !records.length) return null;
+      const base64Content = records[0].payload.file_content;
+      return fromBase64Unicode(base64Content);
+    } catch (err) {
+      console.error('fetchBase44ByUniqueId failed', uniqueId, err);
+      return null;
+    }
+  }
+
   const params = new URLSearchParams(window.location.search);
   const htmlFile = params.get('unique_id');
-
   if (!htmlFile) {
     document.getElementById("loader").innerText = "Error: No unique_id provided.";
   } else {
@@ -42,131 +64,127 @@
       .then(res => res.json())
       .then(async records => {
         if (!records.length) throw new Error("HTML file not found.");
-        const base64Content = records[0].payload.file_content;
-        const htmlCode = fromBase64Unicode(base64Content);
+        const htmlCode = fromBase64Unicode(records[0].payload.file_content);
 
         const parser = new DOMParser();
         const doc = parser.parseFromString(htmlCode, "text/html");
 
-        // --- set current document's dir/lang based on loaded doc ---
+        // --- copy lang/dir as before ---
         if (doc.documentElement.lang) document.documentElement.lang = doc.documentElement.lang;
         const htmlDir = doc.documentElement.getAttribute('dir');
         const bodyDir = doc.body ? doc.body.getAttribute('dir') : null;
         if (htmlDir) document.documentElement.setAttribute('dir', htmlDir);
         else if (bodyDir) document.documentElement.setAttribute('dir', bodyDir);
 
-        // Collect head children and separate scripts from non-scripts
+        // Separate head nodes into: non-script nodes, css-wrapper scripts, js-wrapper scripts, inline scripts
         const headChildren = doc.head ? Array.from(doc.head.children) : [];
-        const headNonScripts = headChildren.filter(n => n.tagName !== 'SCRIPT');
-        const headScripts = headChildren.filter(n => n.tagName === 'SCRIPT');
+        const headNonScripts = [];
+        const headCssWrappers = []; // scripts that wrap CSS: /i/lc.js?unique_id=...
+        const headJsWrappers = [];  // scripts that are normal JS wrappers (/i/l.js?...)
+        const headInlineScripts = [];
 
-        // Append non-script head nodes first (styles, link, meta, base, etc.)
-        for (const node of headNonScripts) {
-          try {
-            // importNode preserves attributes/content and adapts it to current document
-            const imported = document.importNode(node, true);
-            document.head.appendChild(imported);
-          } catch (e) {
-            // If import fails for some node, try manual clone fallback
-            document.head.appendChild(node.cloneNode(true));
+        for (const node of headChildren) {
+          if (node.tagName !== 'SCRIPT') {
+            headNonScripts.push(node);
+          } else {
+            const src = node.src || '';
+            if (/\/i\/lc\.js\b/.test(src) && /\bunique_id=/.test(src)) {
+              // likely CSS wrapper - extract unique_id
+              const u = new URL(src, window.location.href).searchParams.get('unique_id');
+              headCssWrappers.push({ original: node, uniqueId: u });
+            } else if (src) {
+              headJsWrappers.push(node);
+            } else {
+              headInlineScripts.push(node);
+            }
           }
         }
 
-        // Save body nodes (separate scripts)
+        // BODY nodes split similarly
         const bodyChildren = doc.body ? Array.from(doc.body.childNodes) : [];
-        const bodyNonScripts = bodyChildren.filter(n => !(n.tagName === 'SCRIPT'));
-        const bodyScripts = bodyChildren.filter(n => n.tagName === 'SCRIPT');
+        const bodyNonScripts = [];
+        const bodyScriptNodes = [];
+        for (const node of bodyChildren) {
+          if (node.tagName === 'SCRIPT') bodyScriptNodes.push(node);
+          else bodyNonScripts.push(node);
+        }
 
-        // Safer css loaded detection: handle <style>, <link rel=stylesheet>, and cross-origin sheets
-        function cssSeemsLoaded() {
-          try {
-            // If there are <style> tags in head, that's usually enough
-            if (document.head.querySelectorAll('style').length > 0) return true;
+        // Append head non-scripts first (meta, base, link placeholders if any)
+        for (const node of headNonScripts) {
+          try { document.head.appendChild(document.importNode(node, true)); } catch (_) { document.head.appendChild(node.cloneNode(true)); }
+        }
 
-            const links = Array.from(document.head.querySelectorAll('link[rel="stylesheet"]'));
-            if (links.length === 0) {
-              // no external stylesheet: ok
-              return true;
-            }
-
-            // If we can inspect any stylesheet and see rules, assume loaded
-            for (const sheet of document.styleSheets) {
-              try {
-                if (sheet.cssRules && sheet.cssRules.length > 0) return true;
-              } catch (e) {
-                // cross-origin stylesheets throw on cssRules — assume loaded
-                return true;
-              }
-            }
-
-            // if we found link tags but couldn't confirm rules yet, wait a bit
-            return false;
-          } catch (e) {
-            return true;
+        // For any CSS wrapper scripts, fetch the underlying CSS and inject as <style> inline
+        for (const w of headCssWrappers) {
+          if (!w.uniqueId) continue;
+          const cssText = await fetchBase44ByUniqueId(w.uniqueId);
+          if (cssText !== null) {
+            const styleEl = document.createElement('style');
+            styleEl.setAttribute('data-from-wrapper', w.uniqueId);
+            styleEl.textContent = cssText;
+            document.head.appendChild(styleEl);
+          } else {
+            // fallback: append the wrapper script for best-effort (rare)
+            const imported = document.importNode(w.original, true);
+            document.head.appendChild(imported);
           }
         }
 
-        // Append body nodes (non-scripts) WITHOUT nuking the whole body.
-        // Remove only the loader to preserve extension message channels / page lifecycle.
+        // If there are JS wrapper scripts that are essential, keep them to run later (as "external scripts")
+        const scriptsToRunHead = [];
+        for (const node of headJsWrappers) scriptsToRunHead.push(node);
+
+        // Save body nodes (non-scripts) and append them (don't overwrite full body)
         const loaderEl = document.getElementById('loader');
         if (loaderEl) loaderEl.remove();
 
         for (const node of bodyNonScripts) {
-          try {
-            document.body.appendChild(document.importNode(node, true));
-          } catch (e) {
-            document.body.appendChild(node.cloneNode(true));
-          }
+          try { document.body.appendChild(document.importNode(node, true)); } catch (_) { document.body.appendChild(node.cloneNode(true)); }
         }
 
-        // Utility: append scripts sequentially and preserve attributes (await external loads)
+        // Utility: Append scripts sequentially and preserve attributes. Wait for external script loads before next.
         async function appendScriptsSequentially(nodes, parent) {
           for (const node of nodes) {
-            // Create a new script element and copy attributes
             const s = document.createElement('script');
             if (node.attributes) {
               for (let i = 0; i < node.attributes.length; i++) {
                 const attr = node.attributes[i];
-                // copy attribute exactly
                 try { s.setAttribute(attr.name, attr.value); } catch (_) {}
               }
             }
 
-            // If it's a module script, preserve module behavior (do NOT force async=false)
-            const isModule = (node.getAttribute && node.getAttribute('type') === 'module');
-
-            // Inline script
             if (!node.src) {
               s.textContent = node.textContent || '';
               parent.appendChild(s);
-              // inline scripts execute immediately — wait next tick
+              // allow browser to parse inline script
               await new Promise(r => setTimeout(r, 0));
             } else {
-              // External script: set src and wait for load (preserve attributes like crossorigin)
               s.src = node.src;
-              // if not a module, force ordered execution by disabling async
-              if (!isModule) s.async = false;
-              // append then await load or error (resolve either way so chain continues)
+              // preserve module vs nomodule behavior
+              const isModule = node.getAttribute && node.getAttribute('type') === 'module';
+              if (!isModule) s.async = false; // try to preserve order for non-module scripts
               await new Promise(res => {
                 s.onload = () => res();
-                s.onerror = () => res();
+                s.onerror = () => res(); // don't hang if a script fails
                 parent.appendChild(s);
               });
             }
           }
         }
 
-        // Wait until CSS appears loaded or timeout, then append head scripts and body scripts sequentially.
+        // Now append head scripts (external and inline), then body scripts — in order.
+        // We run head scripts first (which many pages rely on), then body scripts.
         (async () => {
-          const start = Date.now();
-          while (!cssSeemsLoaded() && Date.now() - start < 5000) {
-            await new Promise(r => setTimeout(r, 80));
+          try {
+            // head external + inline
+            await appendScriptsSequentially(scriptsToRunHead.concat(headInlineScripts.map(n => n)), document.head);
+            // body scripts
+            await appendScriptsSequentially(bodyScriptNodes, document.body);
+          } catch (e) {
+            console.error('Error injecting scripts', e);
           }
-          // head scripts (in original order)
-          await appendScriptsSequentially(headScripts, document.head);
-          // body scripts (in original order)
-          await appendScriptsSequentially(bodyScripts, document.body);
-        })().catch(err => console.error('inject scripts error', err));
+        })();
+
       })
       .catch(err => {
         document.getElementById("loader").innerText = `Error loading content: ${err}`;
