@@ -257,7 +257,11 @@ window.destroy_tracked_proxies = _destroy_tracked
       const reqPattern = /^\s*#\s*requirements\s*:\s*(.*)$/im;
       const m = decoded.match(reqPattern);
       if (m && m[1]) {
-        const reqs = m[1].split(",").map(s => s.trim()).filter(Boolean);
+        const reqs = m[1]
+          .split(",")
+          .map(s => s.trim())
+          .filter(Boolean)
+          .filter(r => r.toLowerCase() !== "none" && r.toLowerCase() !== "null");
         if (reqs.length) {
           setStatus("Installing packages: " + reqs.join(", "));
           logOut("Installing packages: " + reqs.join(", "));
