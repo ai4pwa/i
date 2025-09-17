@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dynamic Audio Loader</title>
+  <style>
+    html,body { height:100%; }
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      color: #ccc;
+      font-family: monospace;
+      height: 100%;
+    }
+    #loader {
+      font-size: 14px;
+    }
+    audio {
+      max-width: 100%;
+      width: 100%;
+    }
+    .container { width: 100%; max-width: 980px; padding: 20px; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="loader">Loading audio...</div>
+    <audio id="dynamicAudio" controls style="display:none;"></audio>
+  </div>
+
+  <script>
+    (function () {
+      function getParam(name) {
+        try {
+          const url = new URL(window.location.href);
+          return url.searchParams.get(name);
+        } catch (_) {
+          return null;
+        }
+      }
+
+      const uniqueId = getParam("unique_id");
+      const loader = document.getElementById("loader");
+      if (!uniqueId) {
+        loader.textContent = "Error: No unique_id.";
+        return;
+      }
+
+      const apiUrl =
+        "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
+        "?user_id=user_jveo8b35q_1748241619184" +
+        "&payload.unique_id=" + encodeURIComponent(uniqueId);
+
+      fetch(apiUrl, {
+        headers: {
+          "api_key": "69315aa5aa7f4b6fa99c7a420da68bdd",
+          "Content-Type": "application/json"
+        }
+      })
+        .then(res => res.json())
+        .then(records => {
+          if (!records || !records.length) {
+            loader.textContent = "Audio not found.";
+            return;
+          }
+
+          const base64Content = records[0].payload.file_content || "";
+          const fileName = records[0].payload.file_name || "audio.mp3";
+          let mime = "audio/mpeg";
+
+          // Detect MIME type from filename
+          const name = fileName.toLowerCase();
+          if (name.endsWith(".ogg")) mime = "audio/ogg";
+          else if (name.endsWith(".wav")) mime = "audio/wav";
+          else if (name.endsWith(".m4a") || name.endsWith(".mp4")) mime = "audio/mp4";
+          else if (name.endsWith(".aac")) mime = "audio/aac";
+          else if (name.endsWith(".flac")) mime = "audio/flac";
+          else if (name.endsWith(".mp3")) mime = "audio/mpeg";
+
+          const audio = document.getElementById("dynamicAudio");
+          audio.src = "data:" + mime + ";base64," + base64Content;
+          audio.style.display = "block";
+          loader.remove();
+        })
+        .catch(err => {
+          loader.textContent = "Error loading audio.";
+          console.error("la.html error:", err);
+        });
+    })();
+  </script>
+</body>
+</html>
