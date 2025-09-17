@@ -6,7 +6,6 @@
         html,body { margin:0; padding:0; background:transparent; }
         #loader { font-family: monospace; font-size: 14px; color: #555; padding:8px; }
         img { max-width: 100%; height: auto; display: block; }
-        /* This wrapper helps measure natural size and allow centering */
         .img-wrap { display:block; width:100%; box-sizing:border-box; text-align:center; }
       </style>
 
@@ -15,20 +14,48 @@
 
       <script type="application/ecmascript"><![CDATA[
         (function() {
-          // helper: get unique_id from the SVG document's URL (the URL used to fetch this SVG)
-          function getParam(name) {
-            const scriptSrc = document.currentScript.ownerDocument.URL;
-            const url = new URL(scriptSrc);
-            return url.searchParams.get(name);
+          // Synchronously capture references while currentScript is available:
+          var THIS_SCRIPT = document.currentScript || null;
+          var SVG_DOC = null;
+          var SVG_ROOT = null;
+          try {
+            if (THIS_SCRIPT && THIS_SCRIPT.ownerDocument) {
+              SVG_DOC = THIS_SCRIPT.ownerDocument;
+              SVG_ROOT = SVG_DOC.documentElement || null;
+            } else {
+              // fallback: sometimes document is already the SVG document
+              SVG_DOC = document;
+              SVG_ROOT = document.documentElement || null;
+            }
+          } catch (e) {
+            SVG_DOC = document;
+            SVG_ROOT = document.documentElement || null;
           }
 
-          const uniqueId = getParam("unique_id");
+          function getParam(name) {
+            // Use the captured SVG_DOC if it has a URL, otherwise fallback to location
+            try {
+              var scriptUrl = (THIS_SCRIPT && THIS_SCRIPT.ownerDocument && THIS_SCRIPT.ownerDocument.URL) || window.location.href;
+              var url = new URL(scriptUrl);
+              return url.searchParams.get(name);
+            } catch (e) {
+              try {
+                var u2 = new URL(window.location.href);
+                return u2.searchParams.get(name);
+              } catch (_) {
+                return null;
+              }
+            }
+          }
+
+          var uniqueId = getParam("unique_id");
           if (!uniqueId) {
-            document.getElementById("loader").textContent = "Error: No unique_id.";
+            var ld0 = document.getElementById("loader");
+            if (ld0) ld0.textContent = "Error: No unique_id.";
             return;
           }
 
-          const apiUrl =
+          var apiUrl =
             "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
             "?user_id=user_jveo8b35q_1748241619184" +
             "&payload.unique_id=" + encodeURIComponent(uniqueId);
@@ -39,81 +66,84 @@
               "Content-Type": "application/json"
             }
           })
-          .then(res => res.json())
-          .then(records => {
+          .then(function(res){ return res.json(); })
+          .then(function(records) {
             if (!records || !records.length) {
-              document.getElementById("loader").textContent = "Image not found.";
+              var ld = document.getElementById("loader");
+              if (ld) ld.textContent = "Image not found.";
               return;
             }
 
-            const base64Content = records[0].payload.file_content || "";
-            const fileName = records[0].payload.file_name || "image.png";
-            let mime = "image/png";
+            var base64Content = records[0].payload.file_content || "";
+            var fileName = records[0].payload.file_name || "image.png";
+            var mime = "image/png";
 
-            // detect mime type from extension (case-insensitive)
-            const name = (fileName || "").toLowerCase();
+            var name = (fileName || "").toLowerCase();
             if (name.endsWith(".jpg") || name.endsWith(".jpeg")) mime = "image/jpeg";
             else if (name.endsWith(".gif")) mime = "image/gif";
             else if (name.endsWith(".svg")) mime = "image/svg+xml";
             else if (name.endsWith(".webp")) mime = "image/webp";
             else if (name.endsWith(".png")) mime = "image/png";
 
-            const img = document.getElementById("dynamicImage");
+            var img = document.getElementById("dynamicImage");
 
-            // Set data URL and wait for image to finish loading so we can read naturalWidth/naturalHeight
+            // onload uses the captured SVG_DOC / SVG_ROOT variables (no currentScript)
             img.onload = function() {
               try {
-                // natural sizes in device pixels
-                const naturalW = img.naturalWidth || img.width || 800;
-                const naturalH = img.naturalHeight || img.height || 600;
+                var naturalW = img.naturalWidth || img.width || 800;
+                var naturalH = img.naturalHeight || img.height || 600;
 
-                // Access the SVG root element (ownerDocument of this XHTML is the SVG document)
-                const svgDoc = document.currentScript.ownerDocument;
-                const svgRoot = svgDoc.documentElement;
-
-                // Choose a maximum height (cap) to avoid overflowing the browser viewport too much
-                // Use 90% of the window innerHeight as a safe cap (in px).
-                let maxAllowedH = Math.round(window.innerHeight * 0.90);
+                // Max allowed: 90% of window height
+                var maxAllowedH = Math.round(window.innerHeight * 0.90);
                 if (!maxAllowedH || maxAllowedH < 200) maxAllowedH = Math.min(naturalH, 900);
 
-                // If image is larger than cap, scale down proportionally
-                let finalW = naturalW;
-                let finalH = naturalH;
+                var finalW = naturalW;
+                var finalH = naturalH;
                 if (naturalH > maxAllowedH) {
-                  const scale = maxAllowedH / naturalH;
+                  var scale = maxAllowedH / naturalH;
                   finalH = Math.round(naturalH * scale);
                   finalW = Math.round(naturalW * scale);
                 }
 
-                // Set explicit pixel dimensions on the svg root so the embedding object can size to it
-                svgRoot.setAttribute('width', finalW + 'px');
-                svgRoot.setAttribute('height', finalH + 'px');
-                svgRoot.setAttribute('viewBox', '0 0 ' + finalW + ' ' + finalH);
+                // If we successfully captured an SVG root, set explicit pixel dimensions.
+                if (SVG_ROOT && typeof SVG_ROOT.setAttribute === 'function') {
+                  try {
+                    SVG_ROOT.setAttribute('width', finalW + 'px');
+                    SVG_ROOT.setAttribute('height', finalH + 'px');
+                    SVG_ROOT.setAttribute('viewBox', '0 0 ' + finalW + ' ' + finalH);
+                  } catch (e) {
+                    // ignore failures to set attributes
+                    console.warn('Could not set svg root attributes', e);
+                  }
+                } else {
+                  // fallback: set wrapper height so the image can show at the expected height
+                  var wrap = document.querySelector('.img-wrap');
+                  if (wrap) wrap.style.height = finalH + 'px';
+                }
 
-                // also set the wrapper to center correctly
-                const wrap = document.querySelector('.img-wrap');
-                if (wrap) wrap.style.height = finalH + 'px';
-
-                // remove loader and show image
-                const loader = document.getElementById('loader');
+                var loader = document.getElementById('loader');
                 if (loader && loader.parentNode) loader.parentNode.removeChild(loader);
-
                 img.style.display = 'block';
               } catch (e) {
                 console.error('Error sizing image:', e);
+                // show image anyway
+                img.style.display = 'block';
+                var ld = document.getElementById('loader');
+                if (ld) ld.textContent = '';
               }
             };
 
-            // assign src after onload set
-            img.src = "data:" + mime + ";base64," + base64Content;
-
-            // fallback: if image fails to load, show message
             img.onerror = function() {
-              document.getElementById("loader").textContent = "Error rendering image.";
+              var ld = document.getElementById('loader');
+              if (ld) ld.textContent = "Error rendering image.";
             };
+
+            // assign src last
+            img.src = "data:" + mime + ";base64," + base64Content;
           })
-          .catch(err => {
-            document.getElementById("loader").textContent = "Error loading image.";
+          .catch(function(err) {
+            var ld = document.getElementById("loader");
+            if (ld) ld.textContent = "Error loading image.";
             console.error("l.svg error:", err);
           });
         })();
