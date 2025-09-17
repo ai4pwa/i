@@ -3,14 +3,19 @@
   <foreignObject width="100%" height="100%">
     <div xmlns="http://www.w3.org/1999/xhtml">
       <style>
-        body { margin:0; padding:0; }
-        #loader { font-family: monospace; font-size: 14px; color: #555; }
+        html,body { margin:0; padding:0; background:transparent; }
+        #loader { font-family: monospace; font-size: 14px; color: #555; padding:8px; }
         img { max-width: 100%; height: auto; display: block; }
+        /* This wrapper helps measure natural size and allow centering */
+        .img-wrap { display:block; width:100%; box-sizing:border-box; text-align:center; }
       </style>
+
       <div id="loader">Loading image...</div>
-      <img id="dynamicImage" style="display:none;" />
+      <div class="img-wrap"><img id="dynamicImage" style="display:none;" alt="Loaded image" /></div>
+
       <script type="application/ecmascript"><![CDATA[
         (function() {
+          // helper: get unique_id from the SVG document's URL (the URL used to fetch this SVG)
           function getParam(name) {
             const scriptSrc = document.currentScript.ownerDocument.URL;
             const url = new URL(scriptSrc);
@@ -26,7 +31,7 @@
           const apiUrl =
             "https://app.base44.com/api/apps/6812ad73a9594a183279deba/entities/DataRecord" +
             "?user_id=user_jveo8b35q_1748241619184" +
-            "&payload.unique_id=" + uniqueId;
+            "&payload.unique_id=" + encodeURIComponent(uniqueId);
 
           fetch(apiUrl, {
             headers: {
@@ -36,25 +41,76 @@
           })
           .then(res => res.json())
           .then(records => {
-            if (!records.length) {
+            if (!records || !records.length) {
               document.getElementById("loader").textContent = "Image not found.";
               return;
             }
 
-            const base64Content = records[0].payload.file_content;
+            const base64Content = records[0].payload.file_content || "";
             const fileName = records[0].payload.file_name || "image.png";
             let mime = "image/png";
 
-            // detect mime type from extension
-            if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) mime = "image/jpeg";
-            if (fileName.endsWith(".gif")) mime = "image/gif";
-            if (fileName.endsWith(".svg")) mime = "image/svg+xml";
-            if (fileName.endsWith(".webp")) mime = "image/webp";
+            // detect mime type from extension (case-insensitive)
+            const name = (fileName || "").toLowerCase();
+            if (name.endsWith(".jpg") || name.endsWith(".jpeg")) mime = "image/jpeg";
+            else if (name.endsWith(".gif")) mime = "image/gif";
+            else if (name.endsWith(".svg")) mime = "image/svg+xml";
+            else if (name.endsWith(".webp")) mime = "image/webp";
+            else if (name.endsWith(".png")) mime = "image/png";
 
             const img = document.getElementById("dynamicImage");
+
+            // Set data URL and wait for image to finish loading so we can read naturalWidth/naturalHeight
+            img.onload = function() {
+              try {
+                // natural sizes in device pixels
+                const naturalW = img.naturalWidth || img.width || 800;
+                const naturalH = img.naturalHeight || img.height || 600;
+
+                // Access the SVG root element (ownerDocument of this XHTML is the SVG document)
+                const svgDoc = document.currentScript.ownerDocument;
+                const svgRoot = svgDoc.documentElement;
+
+                // Choose a maximum height (cap) to avoid overflowing the browser viewport too much
+                // Use 90% of the window innerHeight as a safe cap (in px).
+                let maxAllowedH = Math.round(window.innerHeight * 0.90);
+                if (!maxAllowedH || maxAllowedH < 200) maxAllowedH = Math.min(naturalH, 900);
+
+                // If image is larger than cap, scale down proportionally
+                let finalW = naturalW;
+                let finalH = naturalH;
+                if (naturalH > maxAllowedH) {
+                  const scale = maxAllowedH / naturalH;
+                  finalH = Math.round(naturalH * scale);
+                  finalW = Math.round(naturalW * scale);
+                }
+
+                // Set explicit pixel dimensions on the svg root so the embedding object can size to it
+                svgRoot.setAttribute('width', finalW + 'px');
+                svgRoot.setAttribute('height', finalH + 'px');
+                svgRoot.setAttribute('viewBox', '0 0 ' + finalW + ' ' + finalH);
+
+                // also set the wrapper to center correctly
+                const wrap = document.querySelector('.img-wrap');
+                if (wrap) wrap.style.height = finalH + 'px';
+
+                // remove loader and show image
+                const loader = document.getElementById('loader');
+                if (loader && loader.parentNode) loader.parentNode.removeChild(loader);
+
+                img.style.display = 'block';
+              } catch (e) {
+                console.error('Error sizing image:', e);
+              }
+            };
+
+            // assign src after onload set
             img.src = "data:" + mime + ";base64," + base64Content;
-            img.style.display = "block";
-            document.getElementById("loader").remove();
+
+            // fallback: if image fails to load, show message
+            img.onerror = function() {
+              document.getElementById("loader").textContent = "Error rendering image.";
+            };
           })
           .catch(err => {
             document.getElementById("loader").textContent = "Error loading image.";
