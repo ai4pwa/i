@@ -1,5 +1,5 @@
 // server.js
-// Express mediator: Context7 (v1 REST and MCP fallback) -> Gemini (server-side) for your web app.
+// Express mediator: Context7 (v1 REST search + docs, with MCP fallback) -> Gemini (server-side)
 // Node 18+ assumed (global fetch available). Keep API keys in Render env vars.
 
 import express from 'express';
@@ -16,7 +16,7 @@ const ALLOWED_ORIGINS = RAW_ALLOWED.split(',').map(s => s.trim()).filter(Boolean
 
 // Context7 config
 const CONTEXT7_API_BASE = process.env.CONTEXT7_API_BASE || 'https://context7.com/api/v1';
-const CONTEXT7_MCP_URL = process.env.CONTEXT7_MCP_URL || 'https://mcp.context7.com/mcp'; // fallback MCP RPC endpoint (if used)
+const CONTEXT7_MCP_URL = process.env.CONTEXT7_MCP_URL || 'https://mcp.context7.com/mcp';
 const CONTEXT7_KEY = process.env.CONTEXT7_API_KEY || '';
 
 // Gemini config
@@ -55,9 +55,7 @@ app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 // ---------- Context7 v1 REST helpers (search + get docs) ----------
 async function searchContext7Library(query) {
   const url = `${CONTEXT7_API_BASE}/search?query=${encodeURIComponent(query)}`;
-  const headers = {
-    'Accept': 'application/json'
-  };
+  const headers = { 'Accept': 'application/json' };
   if (CONTEXT7_KEY) headers['Authorization'] = `Bearer ${CONTEXT7_KEY}`;
 
   const resp = await fetch(url, { method: 'GET', headers });
@@ -76,10 +74,8 @@ async function searchContext7Library(query) {
 }
 
 async function getContext7DocsById(id, { type = 'txt', topic = null, tokens = 5000 } = {}) {
-  // Normalize id: ensure it begins with '/'
   let path = String(id || '').trim();
   if (!path) throw new Error('Invalid Context7 id');
-  // strip trailing "/documentation" if present (some search results include it)
   path = path.replace(/\/documentation$/, '');
   if (!path.startsWith('/')) path = '/' + path;
 
@@ -111,7 +107,7 @@ async function getContext7DocsById(id, { type = 'txt', topic = null, tokens = 50
   }
 }
 
-// ---------- MCP RPC fallback helper (robust: handles JSON and text/event-stream SSE) ----------
+// ---------- MCP RPC fallback helper (robust: handles JSON and SSE) ----------
 async function callContext7Tool(toolName, args = {}) {
   const body = {
     jsonrpc: "2.0",
@@ -192,7 +188,6 @@ async function callContext7Tool(toolName, args = {}) {
     }
   }
 
-  // fallback: try to parse body as JSON
   const txt = await resp.text().catch(() => '');
   try {
     const j = JSON.parse(txt);
@@ -218,7 +213,6 @@ async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000)
     console.log('Context7: searching for library via v1 API:', libraryName);
     const results = await searchContext7Library(libraryName);
     if (Array.isArray(results) && results.length) {
-      // heuristics: prefer exact-ish match on id/title, else take first result
       let chosen = results[0];
       const lower = libraryName.toLowerCase();
       const found = results.find(r =>
@@ -239,14 +233,12 @@ async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000)
         }
       } catch (e) {
         console.error('Context7 v1 docs fetch error for', libId, e?.message || e);
-        // fall through to fallback below
       }
     } else {
       console.log('Context7 v1 search returned no results for', libraryName);
     }
   } catch (e) {
     console.error('Context7 v1 search error:', e?.message || e);
-    // fall through to MCP fallback
   }
 
   // 2) Fallback to MCP RPC (resolve-library-id + get-library-docs)
@@ -281,7 +273,6 @@ async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000)
     return docsText;
   } catch (e) {
     console.error('Context7 MCP fallback also failed for', libraryName, e?.message || e);
-    // final fallback: return empty string so the caller can handle gracefully
     return '';
   }
 }
@@ -380,20 +371,60 @@ async function callGemini(prompt) {
   throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
 }
 
-// ---------- API endpoint (with per-request debug) ----------
+// ---------- API endpoint (with per-request auto-search + debug) ----------
 app.post('/api/ai/chat', async (req, res) => {
   try {
-    const { message, projectContext = '', libraries = [], topic, systemInstructions = '', debug = false } = req.body || {};
+    // NOTE: libraries is let because we may replace it with auto-selected ids
+    let {
+      message,
+      projectContext = '',
+      libraries = [],
+      // auto-search controls — client can send autoSearch:true or autoSearchQuery to trigger auto-search
+      autoSearch = false,
+      autoSearchQuery = null,
+      autoSearchTop = 3,
+      topic,
+      systemInstructions = '',
+      debug = false,
+      docTokens // optional: client may pass desired token budget for docs
+    } = req.body || {};
+
     if (!message) return res.status(400).json({ error: 'missing message' });
 
-    const debugInfo = { docsUsed: [], docsSnippet: null, promptSent: null, context7Error: null };
+    // debug container
+    const debugInfo = { docsUsed: [], docsSnippet: null, promptSent: null, context7Error: null, autoSelected: null };
+
+    // ---------- AUTO-SEARCH: when libraries not provided, and autoSearch requested ----------
+    if ((!Array.isArray(libraries) || libraries.length === 0) && (autoSearch || autoSearchQuery)) {
+      const q = (typeof autoSearchQuery === 'string' && autoSearchQuery.trim()) ? autoSearchQuery.trim() : message;
+      try {
+        const results = await searchContext7Library(q);
+        if (Array.isArray(results) && results.length) {
+          // pick top N ids (filter truthy ids)
+          const topIds = results.slice(0, Math.max(1, Number(autoSearchTop) || 3)).map(r => r.id).filter(Boolean);
+          if (topIds.length) {
+            libraries = topIds;
+            debugInfo.autoSelected = topIds;
+            console.log('Context7 auto-selected libraries for query:', q, topIds);
+          } else {
+            console.log('Context7 auto-search returned results but no ids for query:', q);
+          }
+        } else {
+          console.log('Context7 auto-search returned no results for query:', q);
+        }
+      } catch (e) {
+        console.error('Context7 auto-search failed:', e?.message || e);
+        if (debug) debugInfo.context7Error = String(e?.message || e);
+      }
+    }
 
     // 1) fetch docs if requested (v1 + fallback)
     let docsBlock = '';
     if (Array.isArray(libraries) && libraries.length) {
       for (const lib of libraries) {
         try {
-          const docsText = await fetchDocsForLibrary(lib, topic || null, 10000);
+          // pass docTokens if provided; otherwise default tokenLimit
+          const docsText = await fetchDocsForLibrary(lib, topic || null, docTokens || 10000);
           if (docsText && docsText.trim()) {
             docsBlock += `=== CONTEXT7 DOCS FOR ${lib} ===\n${docsText}\n=== END DOCS ===\n\n`;
             debugInfo.docsUsed.push(lib);
