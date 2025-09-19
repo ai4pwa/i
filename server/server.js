@@ -7,30 +7,28 @@ import express from 'express';
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-// ---------- Configuration from environment ----------
+// ---------- Configuration ----------
 const PORT = Number(process.env.PORT || 3000);
 
-// CORS config: support a comma-separated ALLOWED_ORIGINS or a single ALLOW_ORIGIN.
+// CORS: use ALLOWED_ORIGINS (comma-separated) or ALLOW_ORIGIN single value; for quick testing RAW_ALLOWED='*'
 const RAW_ALLOWED = process.env.ALLOWED_ORIGINS || process.env.ALLOW_ORIGIN || '';
 const ALLOWED_ORIGINS = RAW_ALLOWED.split(',').map(s => s.trim()).filter(Boolean);
 
-// Context7 MCP endpoint & key
+// Context7
 const CONTEXT7_URL = process.env.CONTEXT7_URL || 'https://mcp.context7.com/mcp';
 const CONTEXT7_KEY = process.env.CONTEXT7_API_KEY || '';
 
-// Gemini config
+// Gemini
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
-// Simple in-memory cache for fetched docs: { key -> { text, ts } }
+// Cache
 const docsCache = new Map();
 const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
 
-function nowId() {
-  return `${Date.now()}`;
-}
+function nowId() { return `${Date.now()}`; }
 
-// ---------- CORS middleware (whitelist-aware) ----------
+// ---------- CORS middleware ----------
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.length) {
@@ -38,29 +36,22 @@ app.use((req, res, next) => {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
     }
-    // else: not allowed — omit header
   } else if (RAW_ALLOWED === '*') {
-    // wildcard mode (use only for quick testing)
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
-  // else: omit Access-Control-Allow-Origin to be safe
-
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
-// ---------- Basic routes ----------
+// ---------- Simple routes ----------
 app.get('/', (req, res) => {
-  res.send('AI Mediator is running. Use /health for JSON status and POST /api/ai/chat for the API.');
+  res.send('AI Mediator is running. Use /health for status and POST /api/ai/chat for the API.');
 });
+app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-app.get('/health', (req, res) => {
-  res.json({ ok: true, ts: Date.now() });
-});
-
-// ---------- Context7 MCP helper ----------
+// ---------- Context7 helpers ----------
 async function callContext7Tool(toolName, args = {}) {
   const body = {
     jsonrpc: "2.0",
@@ -68,23 +59,14 @@ async function callContext7Tool(toolName, args = {}) {
     method: "tools/call",
     params: { name: toolName, arguments: args }
   };
-
   const headers = { 'Content-Type': 'application/json' };
-  if (CONTEXT7_KEY) {
-    headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
-  }
+  if (CONTEXT7_KEY) headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
 
-  const resp = await fetch(CONTEXT7_URL, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body)
-  });
-
+  const resp = await fetch(CONTEXT7_URL, { method: 'POST', headers, body: JSON.stringify(body) });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
     throw new Error(`Context7 HTTP ${resp.status}: ${txt}`);
   }
-
   const j = await resp.json().catch(() => null);
   if (!j) throw new Error('Context7 returned non-JSON response');
   if (j.error) throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
@@ -94,17 +76,9 @@ async function callContext7Tool(toolName, args = {}) {
 function extractTextFromMcpResult(result) {
   if (!result) return '';
   if (result.structuredContent) {
-    try {
-      return JSON.stringify(result.structuredContent, null, 2);
-    } catch (e) {
-      // fallthrough
-    }
+    try { return JSON.stringify(result.structuredContent, null, 2); } catch {}
   }
-  const parts = (result.content || []).map(c => {
-    if (c && typeof c.text === 'string') return c.text;
-    if (typeof c === 'string') return c;
-    return '';
-  });
+  const parts = (result.content || []).map(c => (c && typeof c.text === 'string') ? c.text : (typeof c === 'string' ? c : ''));
   return parts.join('\n\n');
 }
 
@@ -113,18 +87,13 @@ async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000)
   const cached = docsCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts) < CACHE_TTL_MS) return cached.text;
 
-  // 1) resolve library id
   const resolved = await callContext7Tool('resolve-library-id', { libraryName });
   let libraryId = libraryName;
   if (resolved) {
-    if (resolved.structuredContent && resolved.structuredContent.id) {
-      libraryId = resolved.structuredContent.id;
-    } else if (Array.isArray(resolved.content) && resolved.content.length && resolved.content[0].text) {
-      libraryId = resolved.content[0].text.trim().split('\n')[0] || libraryName;
-    }
+    if (resolved.structuredContent && resolved.structuredContent.id) libraryId = resolved.structuredContent.id;
+    else if (Array.isArray(resolved.content) && resolved.content.length && resolved.content[0].text) libraryId = resolved.content[0].text.trim().split('\n')[0] || libraryName;
   }
 
-  // 2) get docs
   const docsRes = await callContext7Tool('get-library-docs', {
     context7CompatibleLibraryID: libraryId,
     topic: topic || undefined,
@@ -136,56 +105,38 @@ async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000)
   return docsText;
 }
 
-// ---------- Gemini call helper (robust extractor) ----------
+// ---------- Gemini helper (robust) ----------
 async function callGemini(prompt) {
   if (!GEMINI_KEY) throw new Error('No GEMINI_API_KEY set on server');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
-
-  // Put the preamble into the user role (this endpoint accepts only 'user' and 'model')
   const systemPreamble = "You are an expert coding assistant. Use the documentation below as authoritative.";
   const combinedText = `${systemPreamble}\n\n${prompt}`;
 
-  const body = {
-    contents: [
-      { role: 'user', parts: [{ text: combinedText }] }
-    ]
-  };
+  const body = { contents: [ { role: 'user', parts: [ { text: combinedText } ] } ] };
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-
+  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   let data;
-  try {
-    data = await resp.json();
-  } catch (e) {
+  try { data = await resp.json(); } catch (e) {
     const txt = await resp.text().catch(() => '');
     throw new Error('Failed to parse Gemini response: ' + (txt || e.message));
   }
 
-  // Helper: extract text from many possible candidate shapes
+  // robust extractor for many shapes
   function extractTextFromCandidate(c) {
     if (!c) return '';
-
-    // 1) candidate.outputText
     if (typeof c.outputText === 'string' && c.outputText.trim()) return c.outputText;
 
-    // 2) candidate.content as array
     if (Array.isArray(c.content)) {
       let acc = '';
       for (const block of c.content) {
         if (typeof block === 'string') acc += block;
-        else if (block && Array.isArray(block.parts)) {
-          for (const p of block.parts) if (p && typeof p.text === 'string') acc += p.text;
-        } else if (block && typeof block.text === 'string') acc += block.text;
+        else if (block && Array.isArray(block.parts)) for (const p of block.parts) if (p && typeof p.text === 'string') acc += p.text;
+        else if (block && typeof block.text === 'string') acc += block.text;
       }
       if (acc.trim()) return acc;
     }
 
-    // 3) candidate.content as object (observed in logs)
     if (c.content && typeof c.content === 'object') {
       if (Array.isArray(c.content.parts)) {
         let acc = '';
@@ -195,16 +146,14 @@ async function callGemini(prompt) {
       if (Array.isArray(c.content.content)) {
         let acc = '';
         for (const blk of c.content.content) {
-          if (Array.isArray(blk.parts)) {
-            for (const p of blk.parts) if (p && typeof p.text === 'string') acc += p.text;
-          } else if (typeof blk.text === 'string') acc += blk.text;
+          if (Array.isArray(blk.parts)) for (const p of blk.parts) if (p && typeof p.text === 'string') acc += p.text;
+          else if (typeof blk.text === 'string') acc += blk.text;
         }
         if (acc.trim()) return acc;
       }
       if (typeof c.content.text === 'string' && c.content.text.trim()) return c.content.text;
     }
 
-    // 4) candidate.output alternate
     if (c.output) {
       if (typeof c.output === 'string' && c.output.trim()) return c.output;
       if (Array.isArray(c.output)) {
@@ -218,21 +167,17 @@ async function callGemini(prompt) {
         }
       }
     }
-
     return '';
   }
 
-  // 1) If top-level candidates present
   if (Array.isArray(data?.candidates) && data.candidates.length) {
     const c = data.candidates[0];
     const txt = extractTextFromCandidate(c);
     if (txt) return txt;
   }
 
-  // 2) Top-level outputText
   if (typeof data.outputText === 'string' && data.outputText.trim()) return data.outputText;
 
-  // 3) data.output as fallback
   if (data?.output) {
     if (typeof data.output === 'string' && data.output.trim()) return data.output;
     if (Array.isArray(data.output)) {
@@ -248,14 +193,13 @@ async function callGemini(prompt) {
     }
   }
 
-  // Nothing matched — include response for debugging
   throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
 }
 
-// ---------- Main API endpoint ----------
+// ---------- API endpoint (accepts systemInstructions) ----------
 app.post('/api/ai/chat', async (req, res) => {
   try {
-    const { message, projectContext = '', libraries = [], topic } = req.body || {};
+    const { message, projectContext = '', libraries = [], topic, systemInstructions = '' } = req.body || {};
     if (!message) return res.status(400).json({ error: 'missing message' });
 
     let docsBlock = '';
@@ -271,13 +215,16 @@ app.post('/api/ai/chat', async (req, res) => {
       }
     }
 
-    const finalPrompt = [
-      docsBlock,
-      '=== PROJECT CONTEXT ===',
-      projectContext || '(no project context provided)',
-      '\n=== USER QUESTION ===',
-      message
-    ].join('\n\n');
+    // Construct prompt: system instructions first, then docs, project context, user question
+    const promptParts = [];
+    if (systemInstructions && String(systemInstructions).trim()) {
+      promptParts.push('=== SYSTEM INSTRUCTIONS ===\n' + String(systemInstructions).trim() + '\n=== END SYSTEM ===');
+    }
+    if (docsBlock) promptParts.push(docsBlock);
+    promptParts.push('=== PROJECT CONTEXT ===', projectContext || '(no project context provided)');
+    promptParts.push('\n=== USER QUESTION ===', message);
+
+    const finalPrompt = promptParts.join('\n\n');
 
     const reply = await callGemini(finalPrompt);
     return res.json({ reply });
