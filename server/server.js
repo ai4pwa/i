@@ -11,7 +11,7 @@ app.use(express.json({ limit: '1mb' }));
 const PORT = Number(process.env.PORT || 3000);
 
 // CORS config: support a comma-separated ALLOWED_ORIGINS or a single ALLOW_ORIGIN.
-// You can set ALLOWED_ORIGINS="https://ai4pwa.github.io,https://localhost:3000"
+// Example: ALLOWED_ORIGINS="https://ai4pwa.github.io,https://localhost:3000"
 const RAW_ALLOWED = process.env.ALLOWED_ORIGINS || process.env.ALLOW_ORIGIN || '';
 const ALLOWED_ORIGINS = RAW_ALLOWED.split(',').map(s => s.trim()).filter(Boolean);
 
@@ -40,11 +40,8 @@ app.use((req, res, next) => {
   } else if (RAW_ALLOWED === '*') {
     // wildcard mode (use only for quick testing)
     res.setHeader('Access-Control-Allow-Origin', '*');
-  } else if (!RAW_ALLOWED && origin) {
-    // fallback: when nothing configured, be permissive for development (not recommended)
-    // For safety, comment next line in production:
-    // res.setHeader('Access-Control-Allow-Origin', origin);
   }
+  // else: if no allowed origins configured, we omit Access-Control-Allow-Origin (safer)
 
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -70,13 +67,8 @@ async function callContext7Tool(toolName, args = {}) {
     params: { name: toolName, arguments: args }
   };
 
-  const headers = {
-    'Content-Type': 'application/json'
-  };
-  // if a key is provided, send it in header
-  if (CONTEXT7_KEY) {
-    headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
-  }
+  const headers = { 'Content-Type': 'application/json' };
+  if (CONTEXT7_KEY) headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
 
   const resp = await fetch(CONTEXT7_URL, {
     method: 'POST',
@@ -131,16 +123,19 @@ async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000)
   return docsText;
 }
 
-// ---------- Gemini call helper (minimal payload, tolerant parsing) ----------
+// ---------- Gemini call helper (use only allowed roles: 'user' and optional 'model') ----------
 async function callGemini(prompt) {
   if (!GEMINI_KEY) throw new Error('No GEMINI_API_KEY set on server');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
 
+  // The endpoint accepts only 'user' and 'model' roles for 'contents' — put the preamble inside the user text.
+  const systemPreamble = "You are an expert coding assistant. Use the documentation below as authoritative.";
+  const combinedText = `${systemPreamble}\n\n${prompt}`;
+
   const body = {
     contents: [
-      { role: 'system', parts: [{ text: "You are an expert coding assistant. Use the documentation below as authoritative." }] },
-      { role: 'user', parts: [{ text: prompt }] }
+      { role: 'user', parts: [{ text: combinedText }] }
     ]
   };
 
@@ -158,7 +153,7 @@ async function callGemini(prompt) {
     throw new Error('Failed to parse Gemini response: ' + (txt || e.message));
   }
 
-  // old-style candidates
+  // 1) old-style candidates
   if (data?.candidates && Array.isArray(data.candidates) && data.candidates.length) {
     const c = data.candidates[0];
     let text = '';
@@ -177,10 +172,10 @@ async function callGemini(prompt) {
     if (text) return text;
   }
 
-  // top-level outputText
+  // 2) top-level outputText
   if (typeof data.outputText === 'string' && data.outputText.trim()) return data.outputText;
 
-  // try other likely shapes
+  // 3) try other likely shapes
   try {
     if (data?.output) {
       if (typeof data.output === 'string' && data.output.trim()) return data.output;
@@ -204,7 +199,7 @@ async function callGemini(prompt) {
     // fallthrough
   }
 
-  // final fallback: return JSON for debugging
+  // final fallback: show full response for debugging
   throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
 }
 
@@ -223,7 +218,6 @@ app.post('/api/ai/chat', async (req, res) => {
           docsBlock = `=== CONTEXT7 DOCS FOR ${lib} ===\n${docsText}\n=== END DOCS ===\n\n`;
         }
       } catch (e) {
-        // log but continue without docs
         console.error('Context7 fetch error:', e?.message || e);
       }
     }
