@@ -55,7 +55,7 @@ app.get('/', (req, res) => {
 });
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ---------- Context7 helpers ----------
+// ---------- Context7 helper (updated: include Accept header, better error info) ----------
 async function callContext7Tool(toolName, args = {}) {
   const body = {
     jsonrpc: "2.0",
@@ -63,8 +63,18 @@ async function callContext7Tool(toolName, args = {}) {
     method: "tools/call",
     params: { name: toolName, arguments: args }
   };
-  const headers = { 'Content-Type': 'application/json' };
-  if (CONTEXT7_KEY) headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
+
+  // Required headers: Content-Type and Accept (Context7 expects application/json or text/event-stream)
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json' // include text/event-stream if you later use streaming
+  };
+
+  // Send the Context7 API key in a header if provided.
+  // If Context7 expects a different header name (e.g., Authorization: Bearer ...), update here.
+  if (CONTEXT7_KEY) {
+    headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
+  }
 
   const resp = await fetch(CONTEXT7_URL, {
     method: 'POST',
@@ -74,6 +84,7 @@ async function callContext7Tool(toolName, args = {}) {
 
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
+    // include the response body for easier debugging in Render logs
     throw new Error(`Context7 HTTP ${resp.status}: ${txt}`);
   }
 
