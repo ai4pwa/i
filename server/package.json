@@ -1,0 +1,13 @@
+{
+  "name": "ai-mediator",
+  "version": "1.0.0",
+  "description": "Mediator: Context7 -> Gemini for your web app",
+  "main": "server.js",
+  "engines": { "node": "18.x" },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
