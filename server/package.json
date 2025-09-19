@@ -2,6 +2,7 @@
   "name": "ai-mediator",
   "version": "1.0.0",
   "description": "Mediator: Context7 -> Gemini for your web app",
+  "type": "module",
   "main": "server.js",
   "engines": { "node": "18.x" },
   "scripts": {
