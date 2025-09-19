@@ -1,35 +1,67 @@
-// server.js — Express mediator for Context7 -> Gemini
+// server.js
+// Express mediator: Context7 (MCP) -> Gemini (server-side) for your web app.
+// Node 18+ assumed (global fetch available). Keep API keys in Render env vars.
+
 import express from 'express';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-// CONFIG (set these in Render env variables)
+// ---------- Configuration from environment ----------
 const PORT = Number(process.env.PORT || 3000);
-const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || 'https://ai4pwa.github.io/i'; // change if you use a custom GH pages URL
+
+// CORS config: support a comma-separated ALLOWED_ORIGINS or a single ALLOW_ORIGIN.
+// You can set ALLOWED_ORIGINS="https://ai4pwa.github.io,https://localhost:3000"
+const RAW_ALLOWED = process.env.ALLOWED_ORIGINS || process.env.ALLOW_ORIGIN || '';
+const ALLOWED_ORIGINS = RAW_ALLOWED.split(',').map(s => s.trim()).filter(Boolean);
+
+// Context7 MCP endpoint & key
 const CONTEXT7_URL = process.env.CONTEXT7_URL || 'https://mcp.context7.com/mcp';
 const CONTEXT7_KEY = process.env.CONTEXT7_API_KEY || '';
+
+// Gemini config
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
-// Simple CORS (allow only your GitHub Pages origin)
+// Simple in-memory cache for fetched docs: { key -> { text, ts } }
+const docsCache = new Map();
+const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
+
+function nowId() { return `${Date.now()}`; }
+
+// ---------- CORS middleware (whitelist-aware) ----------
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', ALLOW_ORIGIN);
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.length) {
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    } // else: do not set allow-origin; browser will block
+  } else if (RAW_ALLOWED === '*') {
+    // wildcard mode (use only for quick testing)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (!RAW_ALLOWED && origin) {
+    // fallback: when nothing configured, be permissive for development (not recommended)
+    // For safety, comment next line in production:
+    // res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
-// Health endpoint (use for uptime pings)
-app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
+// ---------- Basic routes ----------
+app.get('/', (req, res) => {
+  res.send('AI Mediator is running. Use /health for JSON status and POST /api/ai/chat for the API.');
+});
 
-// Simple in-memory cache for Context7 docs: { key -> { text, ts } }
-const docsCache = new Map();
-const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
+app.get('/health', (req, res) => {
+  res.json({ ok: true, ts: Date.now() });
+});
 
-function nowId(){ return `${Date.now()}`; }
-
+// ---------- Context7 MCP helper ----------
 async function callContext7Tool(toolName, args = {}) {
   const body = {
     jsonrpc: "2.0",
@@ -38,20 +70,26 @@ async function callContext7Tool(toolName, args = {}) {
     params: { name: toolName, arguments: args }
   };
 
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+  // if a key is provided, send it in header
+  if (CONTEXT7_KEY) {
+    headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
+  }
+
   const resp = await fetch(CONTEXT7_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      // Context7 hosted endpoint recognizes this header for auth (set in Render env)
-      'CONTEXT7_API_KEY': CONTEXT7_KEY
-    },
+    headers,
     body: JSON.stringify(body)
   });
+
   if (!resp.ok) {
-    const txt = await resp.text();
+    const txt = await resp.text().catch(() => '');
     throw new Error(`Context7 HTTP ${resp.status}: ${txt}`);
   }
-  const j = await resp.json();
+  const j = await resp.json().catch(() => null);
+  if (!j) throw new Error('Context7 returned non-JSON response');
   if (j.error) throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
   return j.result;
 }
@@ -65,44 +103,45 @@ function extractTextFromMcpResult(result) {
   return parts.join('\n\n');
 }
 
-async function fetchDocsForLibrary(libraryName, topic=null, tokenLimit=8000) {
-  const cacheKey = `${libraryName}|${topic||''}`;
+async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000) {
+  const cacheKey = `${libraryName}|${topic || ''}`;
   const cached = docsCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts) < CACHE_TTL_MS) return cached.text;
 
-  // 1) Resolve library id
-  const r = await callContext7Tool('resolve-library-id', { libraryName });
-  // attempt to extract id if available
-  let libraryId = null;
-  if (r.structuredContent && r.structuredContent.id) libraryId = r.structuredContent.id;
-  else if (r.content && r.content.length && r.content[0].text) {
-    libraryId = r.content[0].text.trim().split('\n')[0];
-  } else {
-    libraryId = libraryName;
+  // 1) resolve library id
+  const resolved = await callContext7Tool('resolve-library-id', { libraryName });
+  let libraryId = libraryName;
+  if (resolved) {
+    if (resolved.structuredContent && resolved.structuredContent.id) {
+      libraryId = resolved.structuredContent.id;
+    } else if (Array.isArray(resolved.content) && resolved.content.length && resolved.content[0].text) {
+      libraryId = resolved.content[0].text.trim().split('\n')[0] || libraryName;
+    }
   }
 
-  // 2) fetch docs
+  // 2) get docs
   const docsRes = await callContext7Tool('get-library-docs', {
     context7CompatibleLibraryID: libraryId,
     topic: topic || undefined,
     tokens: tokenLimit
   });
+
   const docsText = extractTextFromMcpResult(docsRes);
   docsCache.set(cacheKey, { text: docsText, ts: Date.now() });
   return docsText;
 }
 
+// ---------- Gemini call helper (minimal payload, tolerant parsing) ----------
 async function callGemini(prompt) {
   if (!GEMINI_KEY) throw new Error('No GEMINI_API_KEY set on server');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
+
   const body = {
     contents: [
       { role: 'system', parts: [{ text: "You are an expert coding assistant. Use the documentation below as authoritative." }] },
       { role: 'user', parts: [{ text: prompt }] }
-    ],
-    temperature: 0.0,
-    maxOutputTokens: 1024
+    ]
   };
 
   const resp = await fetch(url, {
@@ -111,29 +150,65 @@ async function callGemini(prompt) {
     body: JSON.stringify(body)
   });
 
-  const data = await resp.json();
-  if (data?.candidates && data.candidates.length) {
+  let data;
+  try {
+    data = await resp.json();
+  } catch (e) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error('Failed to parse Gemini response: ' + (txt || e.message));
+  }
+
+  // old-style candidates
+  if (data?.candidates && Array.isArray(data.candidates) && data.candidates.length) {
     const c = data.candidates[0];
     let text = '';
-    if (c?.content && Array.isArray(c.content)) {
+    if (Array.isArray(c.content)) {
       for (const block of c.content) {
-        if (block?.parts && Array.isArray(block.parts)) {
+        if (Array.isArray(block.parts)) {
           for (const p of block.parts) {
-            if (p?.text) text += p.text;
+            if (typeof p.text === 'string') text += p.text;
           }
-        } else if (block?.text) {
+        } else if (typeof block.text === 'string') {
           text += block.text;
         }
       }
     }
-    if (!text && c?.outputText) text = c.outputText;
+    if (!text && typeof c.outputText === 'string') text = c.outputText;
     if (text) return text;
   }
-  if (data?.outputText) return data.outputText;
-  throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data).slice(0, 1000));
+
+  // top-level outputText
+  if (typeof data.outputText === 'string' && data.outputText.trim()) return data.outputText;
+
+  // try other likely shapes
+  try {
+    if (data?.output) {
+      if (typeof data.output === 'string' && data.output.trim()) return data.output;
+      if (Array.isArray(data.output)) {
+        for (const o of data.output) {
+          if (typeof o === 'string' && o.trim()) return o;
+          if (o?.content && Array.isArray(o.content)) {
+            let acc = '';
+            for (const blk of o.content) {
+              if (blk?.text) acc += blk.text;
+              if (Array.isArray(blk?.parts)) {
+                for (const p of blk.parts) if (p?.text) acc += p.text;
+              }
+            }
+            if (acc.trim()) return acc;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // fallthrough
+  }
+
+  // final fallback: return JSON for debugging
+  throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
 }
 
-// Main API: browser posts here
+// ---------- Main API endpoint ----------
 app.post('/api/ai/chat', async (req, res) => {
   try {
     const { message, projectContext = '', libraries = [], topic } = req.body || {};
@@ -148,7 +223,8 @@ app.post('/api/ai/chat', async (req, res) => {
           docsBlock = `=== CONTEXT7 DOCS FOR ${lib} ===\n${docsText}\n=== END DOCS ===\n\n`;
         }
       } catch (e) {
-        console.error('Context7 fetch error', e?.message || e);
+        // log but continue without docs
+        console.error('Context7 fetch error:', e?.message || e);
       }
     }
 
@@ -163,11 +239,13 @@ app.post('/api/ai/chat', async (req, res) => {
     const reply = await callGemini(finalPrompt);
     return res.json({ reply });
   } catch (err) {
-    console.error('AI chat error', err?.message || err);
-    res.status(500).json({ error: String(err?.message || err) });
+    console.error('AI chat error:', err?.message || err);
+    return res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
+// ---------- Start server ----------
 app.listen(PORT, () => {
-  console.log(`Mediator listening on port ${PORT} (ALLOW_ORIGIN=${ALLOW_ORIGIN})`);
+  console.log(`Mediator listening on port ${PORT}`);
+  console.log(`Allowed origins: ${RAW_ALLOWED || '(none configured)'} | Context7 URL: ${CONTEXT7_URL}`);
 });
