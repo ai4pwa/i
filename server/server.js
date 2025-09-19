@@ -55,7 +55,7 @@ app.get('/', (req, res) => {
 });
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ---------- Context7 helper (updated: include Accept header, better error info) ----------
+// ---------- Context7 helper (diagnostic + Accept header) ----------
 async function callContext7Tool(toolName, args = {}) {
   const body = {
     jsonrpc: "2.0",
@@ -64,33 +64,63 @@ async function callContext7Tool(toolName, args = {}) {
     params: { name: toolName, arguments: args }
   };
 
-  // Required headers: Content-Type and Accept (Context7 expects application/json or text/event-stream)
+  // Required headers: Content-Type and Accept (include text/event-stream for streaming)
   const headers = {
     'Content-Type': 'application/json',
-    'Accept': 'application/json' // include text/event-stream if you later use streaming
+    'Accept': 'application/json, text/event-stream'
   };
 
   // Send the Context7 API key in a header if provided.
-  // If Context7 expects a different header name (e.g., Authorization: Bearer ...), update here.
   if (CONTEXT7_KEY) {
     headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
   }
 
+  // Perform request
   const resp = await fetch(CONTEXT7_URL, {
     method: 'POST',
     headers,
     body: JSON.stringify(body)
   });
 
+  // If not OK, capture response headers + body for debugging and throw a detailed error (logged by Render).
   if (!resp.ok) {
-    const txt = await resp.text().catch(() => '');
-    // include the response body for easier debugging in Render logs
-    throw new Error(`Context7 HTTP ${resp.status}: ${txt}`);
+    let respText = '';
+    try { respText = await resp.text(); } catch (e) { respText = `<failed to read body: ${e.message}>`; }
+
+    // Collect response headers into an object for logging
+    let respHeaders = {};
+    try {
+      for (const [k, v] of resp.headers.entries()) respHeaders[k] = v;
+    } catch (e) { respHeaders = { error: 'failed to read headers: ' + e.message }; }
+
+    // Log full diagnostic info to Render logs
+    console.error('Context7 call failed', {
+      url: CONTEXT7_URL,
+      status: resp.status,
+      statusText: resp.statusText,
+      requestHeaders: headers,
+      responseHeaders: respHeaders,
+      responseBodyPreview: typeof respText === 'string' ? respText.slice(0, 4000) : String(respText)
+    });
+
+    // Throw an error that includes status and a short preview of the body (keeps logs actionable)
+    throw new Error(`Context7 HTTP ${resp.status}: ${String(respText).slice(0, 2000)}`);
   }
 
+  // Parse JSON (safe)
   const j = await resp.json().catch(() => null);
-  if (!j) throw new Error('Context7 returned non-JSON response');
-  if (j.error) throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
+  if (!j) {
+    // Log and error if the endpoint returned non-JSON despite 200
+    const txt = await resp.text().catch(() => '');
+    console.error('Context7 returned non-JSON (200):', { url: CONTEXT7_URL, bodyPreview: txt.slice(0, 2000) });
+    throw new Error('Context7 returned non-JSON response');
+  }
+
+  if (j.error) {
+    console.error('Context7 returned error payload (200):', j.error);
+    throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
+  }
+
   return j.result;
 }
 
