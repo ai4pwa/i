@@ -1,5 +1,5 @@
 // server.js
-// Express mediator: Context7 (MCP) -> Gemini (server-side) for your web app.
+// Express mediator: Context7 (v1 REST and MCP fallback) -> Gemini (server-side) for your web app.
 // Node 18+ assumed (global fetch available). Keep API keys in Render env vars.
 
 import express from 'express';
@@ -10,15 +10,16 @@ app.use(express.json({ limit: '2mb' }));
 // ---------- Configuration ----------
 const PORT = Number(process.env.PORT || 3000);
 
-// CORS: use ALLOWED_ORIGINS (comma-separated) or ALLOW_ORIGIN single value; for quick testing RAW_ALLOWED='*'
+// CORS: use ALLOWED_ORIGINS (comma-separated) or ALLOW_ORIGIN single value; for quick testing set RAW_ALLOWED='*'
 const RAW_ALLOWED = process.env.ALLOWED_ORIGINS || process.env.ALLOW_ORIGIN || '';
 const ALLOWED_ORIGINS = RAW_ALLOWED.split(',').map(s => s.trim()).filter(Boolean);
 
-// Context7
-const CONTEXT7_URL = process.env.CONTEXT7_URL || 'https://mcp.context7.com/mcp';
+// Context7 config
+const CONTEXT7_API_BASE = process.env.CONTEXT7_API_BASE || 'https://context7.com/api/v1';
+const CONTEXT7_MCP_URL = process.env.CONTEXT7_MCP_URL || 'https://mcp.context7.com/mcp'; // fallback MCP RPC endpoint (if used)
 const CONTEXT7_KEY = process.env.CONTEXT7_API_KEY || '';
 
-// Gemini
+// Gemini config
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
@@ -26,11 +27,9 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const docsCache = new Map();
 const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
 
-function nowId() {
-  return `${Date.now()}`;
-}
+function nowId() { return `${Date.now()}`; }
 
-// ---------- CORS middleware (whitelist-aware) ----------
+// ---------- CORS middleware ----------
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.length) {
@@ -38,9 +37,7 @@ app.use((req, res, next) => {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
     }
-    // else: omit header -> browser will block
   } else if (RAW_ALLOWED === '*') {
-    // wildcard (only for testing)
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -55,7 +52,66 @@ app.get('/', (req, res) => {
 });
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ---------- Context7 helper (robust: handles JSON and text/event-stream SSE) ----------
+// ---------- Context7 v1 REST helpers (search + get docs) ----------
+async function searchContext7Library(query) {
+  const url = `${CONTEXT7_API_BASE}/search?query=${encodeURIComponent(query)}`;
+  const headers = {
+    'Accept': 'application/json'
+  };
+  if (CONTEXT7_KEY) headers['Authorization'] = `Bearer ${CONTEXT7_KEY}`;
+
+  const resp = await fetch(url, { method: 'GET', headers });
+  const text = await resp.text().catch(() => '');
+  if (!resp.ok) {
+    console.error('Context7 /search failed', { status: resp.status, bodyPreview: text.slice(0, 2000) });
+    throw new Error(`Context7 search failed ${resp.status}: ${text.slice(0,1000)}`);
+  }
+  try {
+    const j = JSON.parse(text);
+    return j.results || [];
+  } catch (e) {
+    console.error('Context7 /search returned non-JSON', { bodyPreview: text.slice(0,2000) });
+    throw new Error('Context7 search returned non-JSON response');
+  }
+}
+
+async function getContext7DocsById(id, { type = 'txt', topic = null, tokens = 5000 } = {}) {
+  // Normalize id: ensure it begins with '/'
+  let path = String(id || '').trim();
+  if (!path) throw new Error('Invalid Context7 id');
+  // strip trailing "/documentation" if present (some search results include it)
+  path = path.replace(/\/documentation$/, '');
+  if (!path.startsWith('/')) path = '/' + path;
+
+  const params = new URLSearchParams();
+  params.set('type', type);
+  if (topic) params.set('topic', topic);
+  if (tokens) params.set('tokens', String(tokens));
+
+  const url = `${CONTEXT7_API_BASE}${path}?${params.toString()}`;
+  const headers = { 'Accept': type === 'txt' ? 'text/plain, application/json' : 'application/json' };
+  if (CONTEXT7_KEY) headers['Authorization'] = `Bearer ${CONTEXT7_KEY}`;
+
+  const resp = await fetch(url, { method: 'GET', headers });
+  const bodyText = await resp.text().catch(() => '');
+  if (!resp.ok) {
+    console.error('Context7 docs fetch failed', { url, status: resp.status, bodyPreview: bodyText.slice(0, 2000) });
+    throw new Error(`Context7 docs fetch failed ${resp.status}: ${bodyText.slice(0, 1000)}`);
+  }
+
+  if (type === 'txt') {
+    return bodyText || '';
+  } else {
+    try {
+      return JSON.parse(bodyText);
+    } catch (e) {
+      console.error('Context7 docs returned non-JSON for json type', { url, bodyPreview: bodyText.slice(0,2000) });
+      throw new Error('Context7 docs returned non-JSON body for json type');
+    }
+  }
+}
+
+// ---------- MCP RPC fallback helper (robust: handles JSON and text/event-stream SSE) ----------
 async function callContext7Tool(toolName, args = {}) {
   const body = {
     jsonrpc: "2.0",
@@ -64,59 +120,52 @@ async function callContext7Tool(toolName, args = {}) {
     params: { name: toolName, arguments: args }
   };
 
-  const headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json, text/event-stream'
-  };
-  if (CONTEXT7_KEY) headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
-
-  const resp = await fetch(CONTEXT7_URL, {
+  const resp = await fetch(process.env.CONTEXT7_MCP_URL || CONTEXT7_MCP_URL, {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      ...(CONTEXT7_KEY ? { 'CONTEXT7_API_KEY': CONTEXT7_KEY } : {})
+    },
     body: JSON.stringify(body)
   });
 
-  // Always collect response headers & content-type for diagnostics
   const contentType = (resp.headers.get('content-type') || '').toLowerCase();
 
-  // If non-OK, read body for diagnostics and throw, but log details first
   if (!resp.ok) {
     let respText = '';
     try { respText = await resp.text(); } catch (e) { respText = `<failed to read body: ${e.message}>`; }
     const respHeaders = {};
     try { for (const [k, v] of resp.headers.entries()) respHeaders[k] = v; } catch (e) { respHeaders._err = e.message; }
 
-    console.error('Context7 call failed (non-OK)', {
-      url: CONTEXT7_URL,
+    console.error('Context7 MCP call failed', {
+      url: process.env.CONTEXT7_MCP_URL || CONTEXT7_MCP_URL,
       status: resp.status,
       statusText: resp.statusText,
-      requestHeaders: headers,
+      requestHeaders: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
       responseHeaders: respHeaders,
       responseBodyPreview: typeof respText === 'string' ? respText.slice(0, 4000) : String(respText)
     });
 
-    throw new Error(`Context7 HTTP ${resp.status}: ${String(respText).slice(0, 2000)}`);
+    throw new Error(`Context7 MCP HTTP ${resp.status}: ${String(respText).slice(0, 2000)}`);
   }
 
-  // If Content-Type is JSON => parse normally
   if (contentType.includes('application/json')) {
     const j = await resp.json().catch(() => null);
     if (!j) {
       const txt = await resp.text().catch(() => '');
-      console.error('Context7 returned 200 but non-JSON body (application/json header present)', { bodyPreview: txt.slice(0, 2000) });
-      throw new Error('Context7 returned non-JSON response');
+      console.error('Context7 MCP returned non-JSON despite JSON content-type', { bodyPreview: txt.slice(0, 2000) });
+      throw new Error('Context7 MCP returned non-JSON response');
     }
     if (j.error) {
-      console.error('Context7 returned error payload (200):', j.error);
-      throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
+      console.error('Context7 MCP returned error payload (200):', j.error);
+      throw new Error(`Context7 MCP error: ${JSON.stringify(j.error)}`);
     }
     return j.result;
   }
 
-  // If Content-Type is SSE (text/event-stream), attempt to parse the last "data:" event as JSON
   if (contentType.includes('text/event-stream')) {
-    const txt = await resp.text().catch(() => null) || '';
-    // Parse SSE: split into event blocks separated by blank lines
+    const txt = await resp.text().catch(() => '');
     const events = txt.split(/\n\n+/);
     let lastData = null;
     for (const ev of events) {
@@ -127,95 +176,115 @@ async function callContext7Tool(toolName, args = {}) {
       }
     }
     if (!lastData) {
-      console.error('Context7 SSE returned but no data: lines found', { preview: txt.slice(0, 2000) });
-      throw new Error('Context7 returned event-stream with no data');
+      console.error('Context7 MCP SSE returned but no data lines', { preview: txt.slice(0,2000) });
+      throw new Error('Context7 MCP returned event-stream with no data');
     }
-    // Try to parse the lastData as JSON
     try {
       const parsed = JSON.parse(lastData);
       if (parsed.error) {
-        console.error('Context7 SSE data contained error object', parsed.error);
-        throw new Error(`Context7 error (SSE): ${JSON.stringify(parsed.error)}`);
+        console.error('Context7 MCP SSE data contained error', parsed.error);
+        throw new Error(`Context7 MCP error (SSE): ${JSON.stringify(parsed.error)}`);
       }
       return parsed.result || parsed;
     } catch (e) {
-      console.error('Context7 SSE data is not valid JSON', { dataPreview: lastData.slice(0, 2000), parseError: e.message });
-      throw new Error('Context7 returned event-stream whose data is not parseable JSON');
+      console.error('Context7 MCP SSE data is not valid JSON', { dataPreview: lastData.slice(0,2000), parseError: e.message });
+      throw new Error('Context7 MCP returned event-stream whose data is not parseable JSON');
     }
   }
 
-  // Fallback: unknown content-type — try to parse body as JSON, but also log
-  const plain = await resp.text().catch(() => null) || '';
+  // fallback: try to parse body as JSON
+  const txt = await resp.text().catch(() => '');
   try {
-    const j = JSON.parse(plain);
+    const j = JSON.parse(txt);
     if (j.error) {
-      console.error('Context7 fallback JSON contained error', j.error);
-      throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
+      console.error('Context7 MCP fallback returned error object', j.error);
+      throw new Error(`Context7 MCP error: ${JSON.stringify(j.error)}`);
     }
     return j.result;
   } catch (e) {
-    console.error('Context7 returned non-JSON and non-SSE response', {
-      contentType,
-      bodyPreview: plain.slice(0, 4000)
-    });
-    throw new Error('Context7 returned non-JSON response');
+    console.error('Context7 MCP returned unknown content-type and non-JSON body', { contentType, bodyPreview: txt.slice(0,2000) });
+    throw new Error('Context7 MCP returned non-JSON response');
   }
 }
 
-function extractTextFromMcpResult(result) {
-  if (!result) return '';
-  if (result.structuredContent) {
-    try { return JSON.stringify(result.structuredContent, null, 2); } catch {}
-  }
-  const parts = (result.content || []).map(c => {
-    if (c && typeof c.text === 'string') return c.text;
-    if (typeof c === 'string') return c;
-    return '';
-  });
-  return parts.join('\n\n');
-}
-
+// ---------- fetchDocsForLibrary: try v1 REST API first; fallback to MCP RPC ----------
 async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000) {
   const cacheKey = `${libraryName}|${topic || ''}`;
   const cached = docsCache.get(cacheKey);
-  if (cached && (Date.now() - cached.ts) < CACHE_TTL_MS) {
-    return cached.text;
-  }
+  if (cached && (Date.now() - cached.ts) < CACHE_TTL_MS) return cached.text;
 
-  // Resolve library id
-  const resolved = await callContext7Tool('resolve-library-id', { libraryName });
-  let libraryId = libraryName;
-  if (resolved) {
-    if (resolved.structuredContent && resolved.structuredContent.id) libraryId = resolved.structuredContent.id;
-    else if (Array.isArray(resolved.content) && resolved.content.length && resolved.content[0].text) libraryId = resolved.content[0].text.trim().split('\n')[0] || libraryName;
-  }
+  // 1) Try v1 REST API: search -> pick best result -> fetch docs (txt)
+  try {
+    console.log('Context7: searching for library via v1 API:', libraryName);
+    const results = await searchContext7Library(libraryName);
+    if (Array.isArray(results) && results.length) {
+      // heuristics: prefer exact-ish match on id/title, else take first result
+      let chosen = results[0];
+      const lower = libraryName.toLowerCase();
+      const found = results.find(r =>
+        (r.id && r.id.toLowerCase().includes(lower)) ||
+        (r.title && r.title.toLowerCase().includes(lower))
+      );
+      if (found) chosen = found;
 
-  // Get docs
-  const docsRes = await callContext7Tool('get-library-docs', {
-    context7CompatibleLibraryID: libraryId,
-    topic: topic || undefined,
-    tokens: tokenLimit
-  });
-
-  const docsText = extractTextFromMcpResult(docsRes);
-  docsCache.set(cacheKey, { text: docsText, ts: Date.now() });
-  return docsText;
-}
-
-// Optional endpoint to inspect cached docs (read-only)
-// GET /api/docs?lib=<libraryName>
-app.get('/api/docs', (req, res) => {
-  const lib = req.query.lib;
-  if (!lib) return res.status(400).send('missing lib query');
-  const prefix = `${lib}|`;
-  for (const [k, v] of docsCache.entries()) {
-    if (k.startsWith(prefix)) {
-      res.type('text').send(v.text);
-      return;
+      const libId = chosen.id;
+      try {
+        console.log('Context7: fetching docs for id via v1 API:', libId);
+        const docsText = await getContext7DocsById(libId, { type: 'txt', topic, tokens: tokenLimit });
+        if (docsText && docsText.trim()) {
+          docsCache.set(cacheKey, { text: docsText, ts: Date.now() });
+          return docsText;
+        } else {
+          console.log('Context7 v1 returned empty docs text for', libId);
+        }
+      } catch (e) {
+        console.error('Context7 v1 docs fetch error for', libId, e?.message || e);
+        // fall through to fallback below
+      }
+    } else {
+      console.log('Context7 v1 search returned no results for', libraryName);
     }
+  } catch (e) {
+    console.error('Context7 v1 search error:', e?.message || e);
+    // fall through to MCP fallback
   }
-  res.status(404).send('no cached docs for ' + lib);
-});
+
+  // 2) Fallback to MCP RPC (resolve-library-id + get-library-docs)
+  try {
+    console.log('Context7: attempting MCP fallback for library:', libraryName);
+    const resolved = await callContext7Tool('resolve-library-id', { libraryName });
+    let libraryId = libraryName;
+    if (resolved) {
+      if (resolved.structuredContent && resolved.structuredContent.id) {
+        libraryId = resolved.structuredContent.id;
+      } else if (Array.isArray(resolved.content) && resolved.content.length && resolved.content[0].text) {
+        libraryId = resolved.content[0].text.trim().split('\n')[0] || libraryName;
+      }
+    }
+
+    const docsRes = await callContext7Tool('get-library-docs', {
+      context7CompatibleLibraryID: libraryId,
+      topic: topic || undefined,
+      tokens: tokenLimit
+    });
+
+    const docsText = (function extractTextFromMcpResult(result) {
+      if (!result) return '';
+      if (result.structuredContent) {
+        try { return JSON.stringify(result.structuredContent, null, 2); } catch {}
+      }
+      const parts = (result.content || []).map(c => (c && typeof c.text === 'string') ? c.text : (typeof c === 'string' ? c : ''));
+      return parts.join('\n\n');
+    })(docsRes);
+
+    docsCache.set(cacheKey, { text: docsText, ts: Date.now() });
+    return docsText;
+  } catch (e) {
+    console.error('Context7 MCP fallback also failed for', libraryName, e?.message || e);
+    // final fallback: return empty string so the caller can handle gracefully
+    return '';
+  }
+}
 
 // ---------- Gemini helper (robust extractor) ----------
 async function callGemini(prompt) {
@@ -223,7 +292,6 @@ async function callGemini(prompt) {
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
 
-  // Put preamble into user role (endpoint accepts only user/model)
   const systemPreamble = "You are an expert coding assistant. Use the documentation below as authoritative.";
   const combinedText = `${systemPreamble}\n\n${prompt}`;
 
@@ -240,19 +308,14 @@ async function callGemini(prompt) {
   });
 
   let data;
-  try {
-    data = await resp.json();
-  } catch (e) {
+  try { data = await resp.json(); } catch (e) {
     const txt = await resp.text().catch(() => '');
     throw new Error('Failed to parse Gemini response: ' + (txt || e.message));
   }
 
-  // Helper: extract text from many possible candidate shapes
   function extractTextFromCandidate(c) {
     if (!c) return '';
-
     if (typeof c.outputText === 'string' && c.outputText.trim()) return c.outputText;
-
     if (Array.isArray(c.content)) {
       let acc = '';
       for (const block of c.content) {
@@ -262,7 +325,6 @@ async function callGemini(prompt) {
       }
       if (acc.trim()) return acc;
     }
-
     if (c.content && typeof c.content === 'object') {
       if (Array.isArray(c.content.parts)) {
         let acc = '';
@@ -279,7 +341,6 @@ async function callGemini(prompt) {
       }
       if (typeof c.content.text === 'string' && c.content.text.trim()) return c.content.text;
     }
-
     if (c.output) {
       if (typeof c.output === 'string' && c.output.trim()) return c.output;
       if (Array.isArray(c.output)) {
@@ -293,21 +354,15 @@ async function callGemini(prompt) {
         }
       }
     }
-
     return '';
   }
 
-  // 1) candidates
   if (Array.isArray(data?.candidates) && data.candidates.length) {
     const c = data.candidates[0];
     const txt = extractTextFromCandidate(c);
     if (txt) return txt;
   }
-
-  // 2) top-level outputText
   if (typeof data.outputText === 'string' && data.outputText.trim()) return data.outputText;
-
-  // 3) data.output fallback
   if (data?.output) {
     if (typeof data.output === 'string' && data.output.trim()) return data.output;
     if (Array.isArray(data.output)) {
@@ -322,42 +377,30 @@ async function callGemini(prompt) {
       }
     }
   }
-
-  // nothing matched
   throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
 }
 
-// ---------- Main API endpoint (with per-request debug) ----------
+// ---------- API endpoint (with per-request debug) ----------
 app.post('/api/ai/chat', async (req, res) => {
   try {
-    const {
-      message,
-      projectContext = '',
-      libraries = [],
-      topic,
-      systemInstructions = '',
-      debug = false
-    } = req.body || {};
-
+    const { message, projectContext = '', libraries = [], topic, systemInstructions = '', debug = false } = req.body || {};
     if (!message) return res.status(400).json({ error: 'missing message' });
 
-    // debug container
     const debugInfo = { docsUsed: [], docsSnippet: null, promptSent: null, context7Error: null };
 
-    // 1) fetch docs for each requested library (append all to prompt)
+    // 1) fetch docs if requested (v1 + fallback)
     let docsBlock = '';
     if (Array.isArray(libraries) && libraries.length) {
       for (const lib of libraries) {
         try {
-          console.log(`Context7: attempting to fetch library '${lib}'`);
           const docsText = await fetchDocsForLibrary(lib, topic || null, 10000);
           if (docsText && docsText.trim()) {
             docsBlock += `=== CONTEXT7 DOCS FOR ${lib} ===\n${docsText}\n=== END DOCS ===\n\n`;
             debugInfo.docsUsed.push(lib);
             if (!debugInfo.docsSnippet) debugInfo.docsSnippet = docsText.slice(0, 2000);
-            console.log(`Context7: fetched library '${lib}' (chars=${docsText.length})`);
+            console.log(`Context7: attached docs for '${lib}' (chars=${docsText.length})`);
           } else {
-            console.log(`Context7: library '${lib}' returned empty docs`);
+            console.log(`Context7: no docs returned for '${lib}'`);
           }
         } catch (e) {
           console.error(`Context7 fetch error for ${lib}:`, e?.message || e);
@@ -366,7 +409,7 @@ app.post('/api/ai/chat', async (req, res) => {
       }
     }
 
-    // 2) Build final prompt: systemInstructions first, then docs, then project context, then user question
+    // 2) Build prompt
     const promptParts = [];
     if (systemInstructions && String(systemInstructions).trim()) {
       promptParts.push('=== SYSTEM INSTRUCTIONS ===\n' + String(systemInstructions).trim() + '\n=== END SYSTEM ===');
@@ -376,24 +419,34 @@ app.post('/api/ai/chat', async (req, res) => {
     promptParts.push('\n=== USER QUESTION ===', message);
     const finalPrompt = promptParts.join('\n\n');
 
-    if (debug) debugInfo.promptSent = finalPrompt.slice(0, 3000); // truncated preview
+    if (debug) debugInfo.promptSent = finalPrompt.slice(0, 3000);
 
     // 3) call Gemini
     const reply = await callGemini(finalPrompt);
 
-    // 4) respond; include debug info when requested
     const response = { reply };
     if (debug) response.debug = debugInfo;
-
     return res.json(response);
+
   } catch (err) {
     console.error('AI chat error:', err?.message || err);
     return res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
+// Optional: expose cached docs for debugging
+app.get('/api/docs', (req, res) => {
+  const lib = req.query.lib;
+  if (!lib) return res.status(400).send('missing lib query');
+  const prefix = `${lib}|`;
+  for (const [k, v] of docsCache.entries()) {
+    if (k.startsWith(prefix)) return res.type('text').send(v.text);
+  }
+  return res.status(404).send('no cached docs for ' + lib);
+});
+
 // ---------- Start server ----------
 app.listen(PORT, () => {
   console.log(`Mediator listening on port ${PORT}`);
-  console.log(`Allowed origins: ${RAW_ALLOWED || '(none configured)'} | Context7 URL: ${CONTEXT7_URL}`);
+  console.log(`Allowed origins: ${RAW_ALLOWED || '(none configured)'} | Context7 API base: ${CONTEXT7_API_BASE}`);
 });
