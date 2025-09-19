@@ -48,21 +48,32 @@
         const parsed = JSON.parse(decoded);
         console.log("l.json: Parsed JSON object ->", parsed);
 
-        // Make available globally
-        window.jsonData = parsed;
-        console.log("l.json: JSON object stored as window.jsonData");
-
-        // 🚀 Automatically render the JSON into the page
-        const pre = document.createElement("pre");
-        pre.style.padding = "1em";
-        pre.style.background = "#f5f5f5";
-        pre.style.border = "1px solid #ddd";
-        pre.style.borderRadius = "8px";
-        pre.style.whiteSpace = "pre-wrap";
-        pre.textContent = JSON.stringify(parsed, null, 2);
-
-        document.body.appendChild(pre);
-        console.log("l.json: JSON automatically rendered into the page");
+      // Make available globally
+      window.jsonData = parsed;
+      console.log("l.json: JSON object stored as window.jsonData");
+      
+      // By default do NOT render the JSON into the page.
+      // To enable human-readable rendering for debugging, add &render=true to the loader script URL.
+      try {
+        const qs = new URL(scriptSrc).searchParams;
+        const shouldRender = qs.get('render') === 'true';
+        if (shouldRender) {
+          const pre = document.createElement('pre');
+          pre.className = 'ljson-auto';
+          pre.style.padding = '1em';
+          pre.style.background = '#f5f5f5';
+          pre.style.border = '1px solid #ddd';
+          pre.style.borderRadius = '8px';
+          pre.style.whiteSpace = 'pre-wrap';
+          pre.textContent = JSON.stringify(parsed, null, 2);
+          document.body.appendChild(pre);
+          console.log('l.json: JSON rendered into the page (render=true)');
+        } else {
+          console.log('l.json: render skipped (render=false or no render param)');
+        }
+      } catch (e) {
+        console.warn('l.json: rendering skipped due to error', e);
+      }
       } catch (e) {
         console.error("l.json: Invalid JSON format ->", e);
       }
