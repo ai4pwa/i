@@ -123,13 +123,13 @@ async function fetchDocsForLibrary(libraryName, topic = null, tokenLimit = 8000)
   return docsText;
 }
 
-// ---------- Gemini call helper (use only allowed roles: 'user' and optional 'model') ----------
+// ---------- Gemini call helper (robust extractor) ----------
 async function callGemini(prompt) {
   if (!GEMINI_KEY) throw new Error('No GEMINI_API_KEY set on server');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
 
-  // The endpoint accepts only 'user' and 'model' roles for 'contents' — put the preamble inside the user text.
+  // Put the preamble into the user role (this endpoint accepts only 'user' and 'model')
   const systemPreamble = "You are an expert coding assistant. Use the documentation below as authoritative.";
   const combinedText = `${systemPreamble}\n\n${prompt}`;
 
@@ -153,51 +153,94 @@ async function callGemini(prompt) {
     throw new Error('Failed to parse Gemini response: ' + (txt || e.message));
   }
 
-  // 1) old-style candidates
-  if (data?.candidates && Array.isArray(data.candidates) && data.candidates.length) {
-    const c = data.candidates[0];
-    let text = '';
+  // Helper: extract text from many possible candidate shapes
+  function extractTextFromCandidate(c) {
+    if (!c) return '';
+
+    // 1) candidate.outputText (common)
+    if (typeof c.outputText === 'string' && c.outputText.trim()) return c.outputText;
+
+    // 2) candidate.content as array
     if (Array.isArray(c.content)) {
+      let acc = '';
       for (const block of c.content) {
-        if (Array.isArray(block.parts)) {
-          for (const p of block.parts) {
-            if (typeof p.text === 'string') text += p.text;
-          }
-        } else if (typeof block.text === 'string') {
-          text += block.text;
-        }
+        if (typeof block === 'string') acc += block;
+        else if (block && Array.isArray(block.parts)) {
+          for (const p of block.parts) if (p && typeof p.text === 'string') acc += p.text;
+        } else if (block && typeof block.text === 'string') acc += block.text;
       }
+      if (acc.trim()) return acc;
     }
-    if (!text && typeof c.outputText === 'string') text = c.outputText;
-    if (text) return text;
-  }
 
-  // 2) top-level outputText
-  if (typeof data.outputText === 'string' && data.outputText.trim()) return data.outputText;
+    // 3) candidate.content as object (observed in your logs)
+    if (c.content && typeof c.content === 'object') {
+      // try .parts
+      if (Array.isArray(c.content.parts)) {
+        let acc = '';
+        for (const p of c.content.parts) if (p && typeof p.text === 'string') acc += p.text;
+        if (acc.trim()) return acc;
+      }
+      // maybe nested content blocks
+      if (Array.isArray(c.content.content)) {
+        let acc = '';
+        for (const blk of c.content.content) {
+          if (Array.isArray(blk.parts)) {
+            for (const p of blk.parts) if (p && typeof p.text === 'string') acc += p.text;
+          } else if (typeof blk.text === 'string') acc += blk.text;
+        }
+        if (acc.trim()) return acc;
+      }
+      // maybe text shorthand
+      if (typeof c.content.text === 'string' && c.content.text.trim()) return c.content.text;
+    }
 
-  // 3) try other likely shapes
-  try {
-    if (data?.output) {
-      if (typeof data.output === 'string' && data.output.trim()) return data.output;
-      if (Array.isArray(data.output)) {
-        for (const o of data.output) {
+    // 4) candidate.output (alternative)
+    if (c.output) {
+      if (typeof c.output === 'string' && c.output.trim()) return c.output;
+      if (Array.isArray(c.output)) {
+        for (const o of c.output) {
           if (typeof o === 'string' && o.trim()) return o;
-          if (o?.content && Array.isArray(o.content)) {
+          if (o && Array.isArray(o.parts)) {
             let acc = '';
-            for (const blk of o.content) {
-              if (blk?.text) acc += blk.text;
-              if (Array.isArray(blk?.parts)) {
-                for (const p of blk.parts) if (p?.text) acc += p.text;
-              }
-            }
+            for (const p of o.parts) if (p && typeof p.text === 'string') acc += p.text;
             if (acc.trim()) return acc;
           }
         }
       }
     }
-  } catch (e) {
-    // fallthrough
+
+    return '';
   }
+
+  // 1) If top-level candidates present
+  if (Array.isArray(data?.candidates) && data.candidates.length) {
+    const c = data.candidates[0];
+    const txt = extractTextFromCandidate(c);
+    if (txt) return txt;
+  }
+
+  // 2) Top-level outputText
+  if (typeof data.outputText === 'string' && data.outputText.trim()) return data.outputText;
+
+  // 3) data.output as fallback
+  if (data?.output) {
+    if (typeof data.output === 'string' && data.output.trim()) return data.output;
+    if (Array.isArray(data.output)) {
+      for (const o of data.output) {
+        if (typeof o === 'string' && o.trim()) return o;
+        if (o && Array.isArray(o.parts)) {
+          let acc = '';
+          for (const p of o.parts) if (p && typeof p.text === 'string') acc += p.text;
+          if (acc.trim()) return acc;
+        }
+        if (o && typeof o.text === 'string' && o.text.trim()) return o.text;
+      }
+    }
+  }
+
+  // Nothing matched — include response for debugging
+  throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
+}
 
   // final fallback: show full response for debugging
   throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
