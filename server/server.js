@@ -11,7 +11,6 @@ app.use(express.json({ limit: '1mb' }));
 const PORT = Number(process.env.PORT || 3000);
 
 // CORS config: support a comma-separated ALLOWED_ORIGINS or a single ALLOW_ORIGIN.
-// Example: ALLOWED_ORIGINS="https://ai4pwa.github.io,https://localhost:3000"
 const RAW_ALLOWED = process.env.ALLOWED_ORIGINS || process.env.ALLOW_ORIGIN || '';
 const ALLOWED_ORIGINS = RAW_ALLOWED.split(',').map(s => s.trim()).filter(Boolean);
 
@@ -27,7 +26,9 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const docsCache = new Map();
 const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
 
-function nowId() { return `${Date.now()}`; }
+function nowId() {
+  return `${Date.now()}`;
+}
 
 // ---------- CORS middleware (whitelist-aware) ----------
 app.use((req, res, next) => {
@@ -36,12 +37,13 @@ app.use((req, res, next) => {
     if (ALLOWED_ORIGINS.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
-    } // else: do not set allow-origin; browser will block
+    }
+    // else: not allowed — omit header
   } else if (RAW_ALLOWED === '*') {
     // wildcard mode (use only for quick testing)
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
-  // else: if no allowed origins configured, we omit Access-Control-Allow-Origin (safer)
+  // else: omit Access-Control-Allow-Origin to be safe
 
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -68,7 +70,9 @@ async function callContext7Tool(toolName, args = {}) {
   };
 
   const headers = { 'Content-Type': 'application/json' };
-  if (CONTEXT7_KEY) headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
+  if (CONTEXT7_KEY) {
+    headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
+  }
 
   const resp = await fetch(CONTEXT7_URL, {
     method: 'POST',
@@ -80,6 +84,7 @@ async function callContext7Tool(toolName, args = {}) {
     const txt = await resp.text().catch(() => '');
     throw new Error(`Context7 HTTP ${resp.status}: ${txt}`);
   }
+
   const j = await resp.json().catch(() => null);
   if (!j) throw new Error('Context7 returned non-JSON response');
   if (j.error) throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
@@ -89,9 +94,17 @@ async function callContext7Tool(toolName, args = {}) {
 function extractTextFromMcpResult(result) {
   if (!result) return '';
   if (result.structuredContent) {
-    try { return JSON.stringify(result.structuredContent, null, 2); } catch {}
+    try {
+      return JSON.stringify(result.structuredContent, null, 2);
+    } catch (e) {
+      // fallthrough
+    }
   }
-  const parts = (result.content || []).map(c => (c && c.text) ? c.text : (typeof c === 'string' ? c : ''));
+  const parts = (result.content || []).map(c => {
+    if (c && typeof c.text === 'string') return c.text;
+    if (typeof c === 'string') return c;
+    return '';
+  });
   return parts.join('\n\n');
 }
 
@@ -157,7 +170,7 @@ async function callGemini(prompt) {
   function extractTextFromCandidate(c) {
     if (!c) return '';
 
-    // 1) candidate.outputText (common)
+    // 1) candidate.outputText
     if (typeof c.outputText === 'string' && c.outputText.trim()) return c.outputText;
 
     // 2) candidate.content as array
@@ -172,15 +185,13 @@ async function callGemini(prompt) {
       if (acc.trim()) return acc;
     }
 
-    // 3) candidate.content as object (observed in your logs)
+    // 3) candidate.content as object (observed in logs)
     if (c.content && typeof c.content === 'object') {
-      // try .parts
       if (Array.isArray(c.content.parts)) {
         let acc = '';
         for (const p of c.content.parts) if (p && typeof p.text === 'string') acc += p.text;
         if (acc.trim()) return acc;
       }
-      // maybe nested content blocks
       if (Array.isArray(c.content.content)) {
         let acc = '';
         for (const blk of c.content.content) {
@@ -190,11 +201,10 @@ async function callGemini(prompt) {
         }
         if (acc.trim()) return acc;
       }
-      // maybe text shorthand
       if (typeof c.content.text === 'string' && c.content.text.trim()) return c.content.text;
     }
 
-    // 4) candidate.output (alternative)
+    // 4) candidate.output alternate
     if (c.output) {
       if (typeof c.output === 'string' && c.output.trim()) return c.output;
       if (Array.isArray(c.output)) {
@@ -239,10 +249,6 @@ async function callGemini(prompt) {
   }
 
   // Nothing matched — include response for debugging
-  throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
-}
-
-  // final fallback: show full response for debugging
   throw new Error('Gemini returned unexpected shape: ' + JSON.stringify(data || {}));
 }
 
