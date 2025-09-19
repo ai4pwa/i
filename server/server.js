@@ -55,7 +55,7 @@ app.get('/', (req, res) => {
 });
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ---------- Context7 helper (diagnostic + Accept header) ----------
+// ---------- Context7 helper (robust: handles JSON and text/event-stream SSE) ----------
 async function callContext7Tool(toolName, args = {}) {
   const body = {
     jsonrpc: "2.0",
@@ -64,37 +64,29 @@ async function callContext7Tool(toolName, args = {}) {
     params: { name: toolName, arguments: args }
   };
 
-  // Required headers: Content-Type and Accept (include text/event-stream for streaming)
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json, text/event-stream'
   };
+  if (CONTEXT7_KEY) headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
 
-  // Send the Context7 API key in a header if provided.
-  if (CONTEXT7_KEY) {
-    headers['CONTEXT7_API_KEY'] = CONTEXT7_KEY;
-  }
-
-  // Perform request
   const resp = await fetch(CONTEXT7_URL, {
     method: 'POST',
     headers,
     body: JSON.stringify(body)
   });
 
-  // If not OK, capture response headers + body for debugging and throw a detailed error (logged by Render).
+  // Always collect response headers & content-type for diagnostics
+  const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+
+  // If non-OK, read body for diagnostics and throw, but log details first
   if (!resp.ok) {
     let respText = '';
     try { respText = await resp.text(); } catch (e) { respText = `<failed to read body: ${e.message}>`; }
+    const respHeaders = {};
+    try { for (const [k, v] of resp.headers.entries()) respHeaders[k] = v; } catch (e) { respHeaders._err = e.message; }
 
-    // Collect response headers into an object for logging
-    let respHeaders = {};
-    try {
-      for (const [k, v] of resp.headers.entries()) respHeaders[k] = v;
-    } catch (e) { respHeaders = { error: 'failed to read headers: ' + e.message }; }
-
-    // Log full diagnostic info to Render logs
-    console.error('Context7 call failed', {
+    console.error('Context7 call failed (non-OK)', {
       url: CONTEXT7_URL,
       status: resp.status,
       statusText: resp.statusText,
@@ -103,25 +95,71 @@ async function callContext7Tool(toolName, args = {}) {
       responseBodyPreview: typeof respText === 'string' ? respText.slice(0, 4000) : String(respText)
     });
 
-    // Throw an error that includes status and a short preview of the body (keeps logs actionable)
     throw new Error(`Context7 HTTP ${resp.status}: ${String(respText).slice(0, 2000)}`);
   }
 
-  // Parse JSON (safe)
-  const j = await resp.json().catch(() => null);
-  if (!j) {
-    // Log and error if the endpoint returned non-JSON despite 200
-    const txt = await resp.text().catch(() => '');
-    console.error('Context7 returned non-JSON (200):', { url: CONTEXT7_URL, bodyPreview: txt.slice(0, 2000) });
+  // If Content-Type is JSON => parse normally
+  if (contentType.includes('application/json')) {
+    const j = await resp.json().catch(() => null);
+    if (!j) {
+      const txt = await resp.text().catch(() => '');
+      console.error('Context7 returned 200 but non-JSON body (application/json header present)', { bodyPreview: txt.slice(0, 2000) });
+      throw new Error('Context7 returned non-JSON response');
+    }
+    if (j.error) {
+      console.error('Context7 returned error payload (200):', j.error);
+      throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
+    }
+    return j.result;
+  }
+
+  // If Content-Type is SSE (text/event-stream), attempt to parse the last "data:" event as JSON
+  if (contentType.includes('text/event-stream')) {
+    const txt = await resp.text().catch(() => null) || '';
+    // Parse SSE: split into event blocks separated by blank lines
+    const events = txt.split(/\n\n+/);
+    let lastData = null;
+    for (const ev of events) {
+      const lines = ev.split(/\n/);
+      for (const line of lines) {
+        const m = line.match(/^data:\s?(.*)$/);
+        if (m) lastData = (lastData ? lastData + '\n' : '') + m[1];
+      }
+    }
+    if (!lastData) {
+      console.error('Context7 SSE returned but no data: lines found', { preview: txt.slice(0, 2000) });
+      throw new Error('Context7 returned event-stream with no data');
+    }
+    // Try to parse the lastData as JSON
+    try {
+      const parsed = JSON.parse(lastData);
+      if (parsed.error) {
+        console.error('Context7 SSE data contained error object', parsed.error);
+        throw new Error(`Context7 error (SSE): ${JSON.stringify(parsed.error)}`);
+      }
+      return parsed.result || parsed;
+    } catch (e) {
+      console.error('Context7 SSE data is not valid JSON', { dataPreview: lastData.slice(0, 2000), parseError: e.message });
+      throw new Error('Context7 returned event-stream whose data is not parseable JSON');
+    }
+  }
+
+  // Fallback: unknown content-type — try to parse body as JSON, but also log
+  const plain = await resp.text().catch(() => null) || '';
+  try {
+    const j = JSON.parse(plain);
+    if (j.error) {
+      console.error('Context7 fallback JSON contained error', j.error);
+      throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
+    }
+    return j.result;
+  } catch (e) {
+    console.error('Context7 returned non-JSON and non-SSE response', {
+      contentType,
+      bodyPreview: plain.slice(0, 4000)
+    });
     throw new Error('Context7 returned non-JSON response');
   }
-
-  if (j.error) {
-    console.error('Context7 returned error payload (200):', j.error);
-    throw new Error(`Context7 error: ${JSON.stringify(j.error)}`);
-  }
-
-  return j.result;
 }
 
 function extractTextFromMcpResult(result) {
