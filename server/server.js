@@ -52,6 +52,28 @@ app.get('/', (req, res) => {
 });
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
+// ---------- Lightweight uptime endpoint for external pingers (very cheap) ----------
+/**
+ * UPTIME_TOKEN (optional): set a long random string in Render env var UPTIME_TOKEN
+ * If set, the monitor should call: /_health?token=<THE_TOKEN>
+ */
+const UPTIME_TOKEN = process.env.UPTIME_TOKEN || null;
+
+app.get('/_health', (req, res) => {
+  // quick auth check if token configured
+  if (UPTIME_TOKEN) {
+    const token = req.query.token || req.headers['x-uptime-token'];
+    if (!token || token !== UPTIME_TOKEN) {
+      // return 403 for unauthorized pings
+      return res.status(403).send('forbidden');
+    }
+  }
+
+  // Extremely small response, do NOT run any heavy logic.
+  // Keep it minimal so the request is fast and cheap.
+  res.status(200).send('OK');
+});
+
 // ---------- Context7 v1 REST helpers (search + get docs) ----------
 async function searchContext7Library(query) {
   const url = `${CONTEXT7_API_BASE}/search?query=${encodeURIComponent(query)}`;
