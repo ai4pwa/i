@@ -28,14 +28,27 @@
       headers: { api_key: '69315aa5aa7f4b6fa99c7a420da68bdd', 'Content-Type': 'application/json' }
     })
       .then(r => r.json())
-      .then(records => {
-        if (!records || !records.length) throw new Error('HTML not found.');
-        const htmlCode = fromBase64Unicode(records[0].payload.file_content);
-        // Replace whole document — same as i.html approach
-        document.open();
-        document.write(htmlCode);
-        document.close();
-      })
+		.then(records => {
+		  if (!records || !records.length) throw new Error('HTML not found.');
+		  const htmlCode = fromBase64Unicode(records[0].payload.file_content);
+
+		  // --- Option 1: copy favicon / apple-touch icons / theme-color from fetched HTML into loader head
+		  const parser = new DOMParser();
+		  const fetchedDoc = parser.parseFromString(htmlCode, 'text/html');
+
+		  (function copyFavicons(srcDoc) {
+			const selectors = 'link[rel*="icon"], link[rel="shortcut icon"], link[rel^="apple-touch"], meta[name="theme-color"], meta[name="msapplication-TileColor"], meta[name="msapplication-TileImage"]';
+			// remove existing matches so we don't duplicate
+			document.head.querySelectorAll(selectors).forEach(el => el.remove());
+			// clone & append favicon/meta nodes from fetched HTML head
+			srcDoc.head.querySelectorAll(selectors).forEach(el => document.head.appendChild(el.cloneNode(true)));
+		  })(fetchedDoc);
+
+		  // Replace whole document — same as i.html approach
+		  document.open();
+		  document.write(htmlCode);
+		  document.close();
+		})
       .catch(err => {
         document.getElementById('loader').innerText = `Error loading content: ${err.message || err}`;
         console.error(err);
