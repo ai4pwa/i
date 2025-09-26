@@ -1,4 +1,4 @@
-asd(function () {
+sasd(function () {
   console.log("l.js: Loader started...");
 
   // Find this script tag in the DOM
