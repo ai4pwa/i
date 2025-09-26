@@ -38,7 +38,24 @@
       const file = records[0].payload;
       let decoded;
       try {
-        decoded = atob(file.file_content);
+        // atob produces a "binary string" (each char code = a raw byte).
+        const binary = atob(file.file_content);
+
+        // Convert binary string to Uint8Array of bytes
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+
+        // Decode UTF-8 bytes to a proper JS string.
+        if (typeof TextDecoder !== "undefined") {
+          decoded = new TextDecoder("utf-8").decode(bytes);
+        } else {
+          // Older fallback: decode via percent-encoding (works in most browsers).
+          // Note: escape() is deprecated but used here only as a fallback.
+          decoded = decodeURIComponent(escape(binary));
+        }
       } catch (e) {
         console.error("l.js: Failed to decode script content.", e);
         return;
